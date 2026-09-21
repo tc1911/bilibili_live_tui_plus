@@ -1,6 +1,7 @@
 package control
 
 import (
+	"github.com/tc1911/bilibili_live_tui_plus/config"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
@@ -111,5 +112,42 @@ func TestTreeKeyCapture(t *testing.T) {
 		if got := treeKeyCapture(tree)(key); got == nil {
 			t.Errorf("叶子节点上按键 %v 被吞了，人就走不动了", key.Key())
 		}
+	}
+}
+
+// 用户报的“中间的弹窗不会关闭，还会变得无法交互”：Esc 被全局 capture 抢走了。
+// 它跑在焦点分发之前，而 focused() 当时写成「焦点不是 main 就算面板」——
+// 确认弹窗的按钮恰好不是 main，于是 Esc 关掉的是面板，弹窗连焦点被丢在屏上。
+func TestConfirmModalEsc(t *testing.T) {
+	config.Config.Background = "NONE"
+	app := tview.NewApplication()
+	main := tview.NewBox()
+	p := &panel{app: app, main: main, client: live.NewClient(""), onLogin: func() {}}
+	p.pages = tview.NewPages().
+		AddPage("main", main, true, true).
+		AddPage("control", p.build(), true, true)
+	app.SetInputCapture(p.onKey)
+	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
+
+	p.onKey(tcell.NewEventKey(tcell.KeyF4, 0, tcell.ModNone))
+	if !p.pages.HasPage("confirm") {
+		t.Fatal("F4 该弹出确认窗")
+	}
+
+	// 第一下 Esc：只关弹窗，焦点还给面板。
+	if got := p.onKey(esc); got != nil {
+		t.Error("确认窗开着时 Esc 该被吞掉（关弹窗）")
+	}
+	if p.pages.HasPage("confirm") {
+		t.Error("Esc 没关掉确认窗")
+	}
+	if app.GetFocus() != p.tree {
+		t.Errorf("关掉确认窗后焦点 = %T，want 分区树（否则面板是死的）", app.GetFocus())
+	}
+
+	// 第二下 Esc：面板还在，关掉它。
+	p.onKey(esc)
+	if app.GetFocus() != p.main {
+		t.Errorf("再按 Esc 该关掉面板，焦点 = %T", app.GetFocus())
 	}
 }

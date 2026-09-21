@@ -138,6 +138,12 @@ func (p *panel) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		p.show()
 		go p.stopLive()
 	case tcell.KeyEscape:
+		// 确认弹窗开着时 Esc 归它。必须先判：全局 capture 跑在焦点分发之前，
+		// 底下那两个分支会把 Esc 当成「关面板」，弹窗就被连人带焦点丢在屏上。
+		if p.pages.HasPage("confirm") {
+			p.closeConfirm()
+			return nil
+		}
 		if p.pages.HasPage("streams") && p.app.GetFocus() == p.streams {
 			p.pages.HidePage("streams")
 			p.pages.ShowPage("control")
@@ -160,7 +166,16 @@ func (p *panel) show() {
 	}
 }
 
-func (p *panel) focused() bool { return p.app.GetFocus() != p.main }
+// focused 焦点是否在面板自己的控件上。
+// 不能写成「焦点不是 main 就算面板」：确认弹窗的按钮也在面板之外，
+// 那样 Esc 会把面板关掉、却把弹窗留在屏上动不了。
+func (p *panel) focused() bool {
+	switch p.app.GetFocus() {
+	case p.tree, p.side, p.streams, p.info, p.hint:
+		return true
+	}
+	return false
+}
 
 // update 供后台 goroutine 改界面用；在事件循环里直接改会死锁。
 func (p *panel) update(fn func()) { p.app.QueueUpdateDraw(fn) }
@@ -403,14 +418,21 @@ func (p *panel) confirmStart() {
 		SetText("开播后直播间会立刻对外可见，粉丝会收到开播推送。\n确定开播？").
 		AddButtons([]string{"开播", "取消"}).
 		SetDoneFunc(func(_ int, label string) {
-			p.pages.RemovePage("confirm")
-			p.app.SetFocus(p.main)
+			p.closeConfirm()
 			if label == "开播" {
 				go p.startLive()
 			}
 		})
 	p.pages.AddPage("confirm", modal, true, true)
 	p.app.SetFocus(modal)
+}
+
+// closeConfirm 收起确认弹窗，并把焦点还给面板的分区树。
+// 焦点不能丢给 main：面板还留在屏上，丢过去之后箭头和 Esc 就全落到弹幕页，
+// 弹窗看着还开着、实际是死的。
+func (p *panel) closeConfirm() {
+	p.pages.RemovePage("confirm")
+	p.app.SetFocus(p.tree)
 }
 
 func (p *panel) startLive() {
