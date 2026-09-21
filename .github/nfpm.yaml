@@ -1,0 +1,21 @@
+# 由 .github/workflows/release.yml 用 nfpm 打包 deb / rpm
+# VERSION 由工作流从 tag 传入（已去掉前导 v，deb 要求版本号以数字开头）
+name: bili
+arch: amd64
+platform: linux
+version: ${VERSION}
+section: utils
+priority: optional
+maintainer: tc1911 <171405782+tc1911@users.noreply.github.com>
+description: Bilibili 直播弹幕 TUI 客户端（扫码登录 / 分区选择 / 开播取推流码）
+vendor: tc1911
+homepage: https://github.com/tc1911/bilibili_live_tui_plus
+license: GPL-2.0
+
+contents:
+  - src: dist/stage/bili
+    dst: /usr/bin/bili
+  - src: LICENSE
+    dst: /usr/share/doc/bili/LICENSE
+  - src: README.md
+    dst: /usr/share/doc/bili/README.md

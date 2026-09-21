@@ -23,22 +23,30 @@ jobs:
       - name: 测试
         run: go test ./...
 
-      - name: 交叉编译并打包 tar.gz
+      - name: 编译并归档 tar.gz
         run: |
           set -eu
-          for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
-            os=${t%/*}
-            arch=${t#*/}
-            if [ "$os" = windows ]; then bin=bili.exe; else bin=bili; fi
-            d=dist/$os-$arch
-            mkdir -p "$d"
-            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags '-s -w' -o "$d/$bin" .
-            cp LICENSE README.md "$d/"
-            tar -C "$d" -czf "dist/bili_${GITHUB_REF_NAME}_${os}_${arch}.tar.gz" "$bin" LICENSE README.md
-          done
-          ls -lh dist/*.tar.gz
+          mkdir -p dist/stage
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '-s -w' -o dist/stage/bili .
+          cp LICENSE README.md dist/stage/
+          tar -C dist/stage -czf "dist/bili_${GITHUB_REF_NAME}_linux_amd64.tar.gz" bili LICENSE README.md
+
+      - name: 装 nfpm
+        env:
+          NFPM_VERSION: 2.47.0
+        run: |
+          curl -sSfL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" | tar -xz nfpm
+          sudo install -m755 nfpm /usr/local/bin/nfpm
+
+      - name: 打 deb / rpm
+        run: |
+          set -eu
+          export VERSION=${GITHUB_REF_NAME#v} # deb 版本号不能带前导 v
+          nfpm package --config .github/nfpm.yaml --packager deb --target dist/
+          nfpm package --config .github/nfpm.yaml --packager rpm --target dist/
+          ls -lh dist/
 
       - name: 发布 Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.deb dist/*.rpm --title "$GITHUB_REF_NAME" --generate-notes
