@@ -59,6 +59,7 @@ func Wrap(app *tview.Application, root tview.Primitive, onLogin func()) *tview.P
 		AddPage("main", root, true, true).
 		AddPage("control", p.build(), true, false).
 		AddPage("streams", p.streams, true, false)
+	p.pages.SetBackgroundColor(bgColor())
 	app.SetInputCapture(p.onKey)
 
 	p.setInfo()
@@ -72,32 +73,52 @@ func Wrap(app *tview.Application, root tview.Primitive, onLogin func()) *tview.P
 }
 
 func (p *panel) build() *tview.Flex {
+	bg := bgColor()
+
 	p.info = tview.NewTextView().SetDynamicColors(true)
 	p.info.SetBorder(true).SetTitle(" 直播间控制 ")
+	p.info.SetBackgroundColor(bg)
 
 	p.side = tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).SetWrap(false)
 	p.side.SetBorder(true).SetTitle(" 扫码 ")
+	p.side.SetBackgroundColor(bg)
 
 	// 服务端返回的密钥有 90~100 字符，夹在 46 列的右栏里不管折不折行都复制不出来。
 	p.streams = tview.NewTextView().SetDynamicColors(true).SetWrap(false)
 	p.streams.SetBorder(true).SetTitle(" 推流码 ")
+	p.streams.SetBackgroundColor(bg)
 
 	p.tree = tview.NewTreeView()
 	p.tree.SetBorder(true).SetTitle(" 分区 ")
 	p.tree.SetSelectedFunc(p.pickArea)
 	p.tree.SetInputCapture(treeKeyCapture(p.tree))
+	p.tree.SetBackgroundColor(bg)
 
 	p.hint = tview.NewTextView().SetDynamicColors(true).SetWrap(true)
+	p.hint.SetBackgroundColor(bg)
 
 	body := tview.NewFlex().
 		AddItem(p.tree, 0, 1, true).
 		AddItem(p.side, 46, 0, false)
+	body.SetBackgroundColor(bg)
 	p.body = body
 
-	return tview.NewFlex().SetDirection(tview.FlexRow).
+	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.info, 5, 0, false).
 		AddItem(body, 0, 1, true).
 		AddItem(p.hint, 2, 0, false)
+	root.SetBackgroundColor(bg)
+	return root
+}
+
+// bgColor 跟主题用同一个背景色。
+// 不刷的控件会落到 tview 的默认背景色（一个固定颜色），在终端上就是一块
+// 和主题不搭的色块；NONE 表示「用终端自己的背景」（tcell.ColorDefault）。
+func bgColor() tcell.Color {
+	if config.Config.Background != "NONE" {
+		return tcell.GetColor(config.Config.Background)
+	}
+	return tcell.ColorDefault
 }
 
 // ---------------------------------------------------------------- 按键
@@ -494,7 +515,7 @@ func (p *panel) showQR(content, title string) {
 				b.WriteString(" ")
 			}
 		}
-		b.WriteString("\n")
+		b.WriteString("[-]\n")
 	}
 
 	// 窄了会被 tview 截断 + 折行，二维码直接报废。留 2 列余量兜底。
