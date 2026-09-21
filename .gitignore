@@ -13,3 +13,6 @@ bin/danmu_sender
 
 **/config.toml
 bili
+src/
+pkg/
+*.pkg.tar.zst
