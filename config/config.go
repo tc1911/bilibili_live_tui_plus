@@ -14,6 +14,8 @@ import (
 type ConfigType struct {
 	Cookie       string // 登录cookie
 	RoomId       int64  // 直播间id
+	AreaV2       int64  // 记忆的开播分区id (area_v2)
+	AreaName     string // 记忆的开播分区名，仅用于显示
 	Theme        int64  // 主题
 	SingleLine   int64  // 是否开启单行
 	ShowTime     int64  // 是否显示时间
@@ -29,6 +31,34 @@ type ConfigType struct {
 var Auth bg.CookieAuth
 var Config ConfigType
 
+// ConfigFile 是本次实际读取的配置文件路径，Save 写回它。
+var ConfigFile string
+
+// Save 把当前配置写回 config.toml（登录、选分区后调用）。
+func Save() error {
+	f, err := os.Create(ConfigFile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return toml.NewEncoder(f).Encode(Config)
+}
+
+// RefreshAuth 把 Config.Cookie 重新解析进 Auth，供登录后即时生效。
+func RefreshAuth() {
+	kvs := make(map[string]string)
+	for _, attr := range strings.Split(Config.Cookie, ";") {
+		kv := strings.SplitN(strings.TrimSpace(attr), "=", 2)
+		if len(kv) == 2 {
+			kvs[kv[0]] = strings.TrimSpace(kv[1])
+		}
+	}
+	Auth.SESSDATA = kvs["SESSDATA"]
+	Auth.DedeUserID = kvs["DedeUserID"]
+	Auth.DedeUserIDCkMd5 = kvs["DedeUserID__ckMd5"]
+	Auth.BiliJCT = kvs["bili_jct"]
+}
+
 func defaultCfgFile() (configFile string, err error) {
 	currentUser, err := user.Current()
 	if err != nil {
@@ -40,6 +70,7 @@ func defaultCfgFile() (configFile string, err error) {
 		return
 	}
 	configFile = path + "/config.toml"
+	ConfigFile = configFile
 	_, err = os.Stat(configFile)
 	if os.IsNotExist(err) {
 		var f *os.File
@@ -66,7 +97,8 @@ func defaultCfgFile() (configFile string, err error) {
 			return
 		}
 
-		panic("配置文件已生成，请修改配置文件后再次运行，配置文件路径为：" + configFile)
+		// 不 panic：默认配置已经写好，TUI 里按 F2 扫码会把 Cookie 写回来。
+		fmt.Println("已生成默认配置：" + configFile + "，启动后按 F2 扫码登录")
 	}
 
 	return
@@ -92,12 +124,14 @@ func Init() {
 			panic(err)
 		}
 	}
+	ConfigFile = configFile
 
 	if _, err := toml.DecodeFile(configFile, &Config); err != nil {
 		fmt.Printf("Error decoding config.toml: %s\n", err)
 	}
 	if Config.Cookie == "从你BILIBILI的请求里抓一个Cookie" {
-		panic("请检查配置文件是否正确: " + configFile)
+		// 不再直接 panic：TUI 里的控制面板（F2）就是用来扫码登录的。
+		fmt.Println("尚未登录，启动后按 F2 扫码登录。配置文件：" + configFile)
 	}
 
 	if roomId != -1 {
@@ -143,16 +177,5 @@ func Init() {
 		Config.Background = "NONE"
 	}
 
-	attrs := strings.Split(Config.Cookie, ";")
-	kvs := make(map[string]string)
-	for _, attr := range attrs {
-		kv := strings.Split(attr, "=")
-		k := strings.Trim(kv[0], " ")
-		v := strings.Trim(kv[1], " ")
-		kvs[k] = v
-	}
-	Auth.SESSDATA = kvs["SESSDATA"]
-	Auth.DedeUserID = kvs["DedeUserID"]
-	Auth.DedeUserIDCkMd5 = kvs["DedeUserID__ckMd5"]
-	Auth.BiliJCT = kvs["bili_jct"]
+	RefreshAuth()
 }

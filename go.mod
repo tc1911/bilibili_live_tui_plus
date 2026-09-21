@@ -1,4 +1,4 @@
-module bili
+module github.com/tc1911/bilibili_live_tui_plus
 
 go 1.21.0
 
@@ -10,6 +10,7 @@ require (
 	github.com/gorilla/websocket v1.5.0
 	github.com/iyear/biligo v0.1.6
 	github.com/rivo/tview v0.0.0-20230330183452-5796b0cd5c1f
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tidwall/gjson v1.14.4
 )
 

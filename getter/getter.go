@@ -1,9 +1,9 @@
 package getter
 
 import (
-	"bili/config"
 	"encoding/json"
 	"fmt"
+	"github.com/tc1911/bilibili_live_tui_plus/config"
 	"net/http"
 	"time"
 
@@ -77,6 +77,9 @@ type handShakeInfo struct {
 	Key      string `json:"key"`
 }
 
+// 风控会看 UA/Referer：只有 WBI 签名、缺浏览器头，getDanmuInfo 依旧返 -352。
+const browserUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
+
 func (d *DanmuClient) connect() (err error) {
 	var (
 		uid    uint32
@@ -86,15 +89,37 @@ func (d *DanmuClient) connect() (err error) {
 		}
 	)
 
+	// 这些头必须赶在 getDanmuInfo 之前设好，它和下面 ws 握手用的是同一份 header。
+	header.Set("User-Agent", browserUA)
+	header.Set("Accept", "*/*")
+	header.Set("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
+	header.Set("Origin", "https://live.bilibili.com")
+	header.Set("Referer", "https://live.bilibili.com/")
+	header.Set("Pragma", "no-cache")
+	header.Set("Cache-Control", "no-cache")
+
 	_, body, err = myhttp.Get("https://api.bilibili.com/x/web-interface/nav", header, nil)
 	if err != nil {
 		return err
 	}
 	uid = uint32(gjson.GetBytes(body, "data.mid").Int())
 
-	_, body, err = myhttp.Get(fmt.Sprintf("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id=%d", d.roomID), header, nil)
+	// getDanmuInfo 必须带 WBI 签名，否则一律返 -352 风控、host_list 为空。
+	mixin, err := wbiMixinKey(header)
 	if err != nil {
 		return err
+	}
+	query := wbiSign(map[string]string{
+		"id":           fmt.Sprint(d.roomID),
+		"type":         "0",
+		"web_location": "444.8",
+	}, mixin, time.Now().Unix())
+	_, body, err = myhttp.Get("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?"+query, header, nil)
+	if err != nil {
+		return err
+	}
+	if code := gjson.GetBytes(body, "code").Int(); code != 0 {
+		return fmt.Errorf("getDanmuInfo 返回 %d: %s", code, gjson.GetBytes(body, "message").String())
 	}
 
 	token := gjson.GetBytes(body, "data.token").String()
@@ -112,14 +137,7 @@ func (d *DanmuClient) connect() (err error) {
 		Key:      token,
 	}
 
-	header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36")
-	header.Set("Accept", "*/*")
-	header.Set("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
 	header.Set("Accept-Encoding", "gzip, deflate, br")
-	header.Set("Origin", "https://live.bilibili.com")
-	header.Set("Pragma", "no-cache")
-	header.Set("Cache-Control", "no-cache")
-	header.Set("Custom-Header", "CustomValue")
 	for _, h := range hostList {
 		d.conn, _, err = websocket.DefaultDialer.Dial(fmt.Sprintf("wss://%s:443/sub", h), header)
 		if err != nil {
@@ -129,6 +147,11 @@ func (d *DanmuClient) connect() (err error) {
 	}
 	if err != nil {
 		return
+	}
+	if d.conn == nil {
+		// host_list 为空时循环一次都不跑，err 还停在上一个请求的 nil 上，
+		// 继续走就会拿 nil 连接发握手包 → 整个进程 panic。
+		return fmt.Errorf("没有可用的弹幕服务器（host_list 共 %d 个）", len(hostList))
 	}
 	body, err = json.Marshal(hsInfo)
 	if err != nil {
@@ -302,14 +325,25 @@ func supervisor(busChan chan DanmuMsg, roomInfoChan chan RoomInfo) {
 			Time:    time.Now(),
 		}
 		dc.isClosed = true
-		dc.conn.Close()
+		if dc.conn != nil { // 没连上时 conn 是 nil，直接关会 panic
+			dc.conn.Close()
+		}
 		time.Sleep(1 * time.Second)
 		supervisor(busChan, roomInfoChan)
 	}()
 
 	err := dc.connect()
 	if err != nil {
-		panic(err)
+		// 这里原来直接 panic，会把整个 TUI 一起带走。
+		// ponytail: 固定 30s 退避，够用了；要快就改成指数退避。
+		busChan <- DanmuMsg{
+			Author:  "system",
+			Content: "弹幕连接失败（30 秒后重试）: " + err.Error(),
+			Type:    "NOTICE_MSG",
+			Time:    time.Now(),
+		}
+		time.Sleep(30 * time.Second)
+		return
 	}
 
 	go dc.getHistory(busChan)

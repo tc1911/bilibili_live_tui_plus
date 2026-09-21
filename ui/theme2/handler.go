@@ -1,9 +1,9 @@
 package theme2
 
 import (
-	"bili/config"
-	"bili/getter"
 	"fmt"
+	"github.com/tc1911/bilibili_live_tui_plus/config"
+	"github.com/tc1911/bilibili_live_tui_plus/getter"
 	"strings"
 
 	"github.com/rivo/tview"

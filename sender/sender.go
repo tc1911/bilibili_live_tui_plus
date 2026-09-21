@@ -1,9 +1,9 @@
 package sender
 
 import (
-	"bili/config"
-	"bili/getter"
 	"fmt"
+	"github.com/tc1911/bilibili_live_tui_plus/config"
+	"github.com/tc1911/bilibili_live_tui_plus/getter"
 	"os"
 	"time"
 
@@ -24,6 +24,10 @@ func heartbeat() {
 }
 
 func SendMsg(roomId int64, msg string, busChan chan getter.DanmuMsg) {
+	if bc == nil { // 未登录时 sender 没起来
+		busChan <- getter.DanmuMsg{Author: "system", Content: "未登录，发不出弹幕（按 F2 扫码登录）"}
+		return
+	}
 	msgRune := []rune(msg)
 	for i := 0; i < len(msgRune); i += 20 {
 		err = nil

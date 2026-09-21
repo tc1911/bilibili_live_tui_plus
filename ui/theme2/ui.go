@@ -3,9 +3,10 @@
 package theme2
 
 import (
-	"bili/config"
-	"bili/getter"
-	"bili/sender"
+	"github.com/tc1911/bilibili_live_tui_plus/config"
+	"github.com/tc1911/bilibili_live_tui_plus/getter"
+	"github.com/tc1911/bilibili_live_tui_plus/sender"
+	"github.com/tc1911/bilibili_live_tui_plus/ui/control"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -46,12 +47,13 @@ func draw(app *tview.Application, roomId int64, busChan chan getter.DanmuMsg, ro
 	return chatGrid
 }
 
-func Run(busChan chan getter.DanmuMsg, roomInfoChan chan getter.RoomInfo) {
+func Run(busChan chan getter.DanmuMsg, roomInfoChan chan getter.RoomInfo, onLogin func()) {
 	if config.Config.Background != "NONE" {
 		bg = tcell.GetColor(config.Config.Background)
 	}
 	app := tview.NewApplication()
-	if err := app.SetRoot(draw(app, config.Config.RoomId, busChan, roomInfoChan), true).EnableMouse(false).Run(); err != nil {
+	root := control.Wrap(app, draw(app, config.Config.RoomId, busChan, roomInfoChan), onLogin)
+	if err := app.SetRoot(root, true).EnableMouse(false).Run(); err != nil {
 		panic(err)
 	}
 }
