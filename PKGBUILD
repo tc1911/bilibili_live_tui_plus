@@ -2,7 +2,7 @@
 # 源码包（不是 -bin）：从 GitHub tag 构建。
 # 上游 yaocccc/bilibili_live_tui 的增强分支，加了扫码登录 / 分区选择 / 开播取推流码。
 pkgname=bilibili-live-tui-plus
-pkgver=1.0.0
+pkgver=1.0.1
 pkgrel=1
 pkgdesc='Bilibili 直播弹幕 TUI 客户端（扫码登录 / 分区选择 / 开播取推流码）'
 arch=('x86_64')
@@ -14,7 +14,7 @@ depends=('glibc' 'ca-certificates')
 makedepends=('go')
 options=('!debug')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/tc1911/bilibili_live_tui_plus/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('fc88a97e9087e634a1c78d7567c39f41d9f59c2d598f7dab69c929a80c363c62')
+sha256sums=('492385061013eac441cce8eaca0d91519f85b57dbdc959c29271f2c912655cc4')
 
 # GitHub 自动生成的 tarball 解出来是 <仓库名>-<版本>：仓库名带下划线，版本号不带 v
 _srcname="bilibili_live_tui_plus-$pkgver"
