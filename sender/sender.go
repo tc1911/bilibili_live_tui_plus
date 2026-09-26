@@ -1,10 +1,8 @@
 package sender
 
 import (
-	"fmt"
 	"github.com/tc1911/bilibili_live_tui_plus/config"
 	"github.com/tc1911/bilibili_live_tui_plus/getter"
-	"os"
 	"time"
 
 	bg "github.com/iyear/biligo"
@@ -13,19 +11,9 @@ import (
 var bc *bg.BiliClient
 var err error
 
-func heartbeat() {
-	start := time.Now()
-	err := bc.VideoHeartBeat(242531611, 173439442, int64(time.Since(start).Seconds()))
-	if err != nil {
-		fmt.Println("failed to send heartbeat; error:", err)
-		os.Exit(0)
-	}
-	time.AfterFunc(time.Second*10, heartbeat)
-}
-
 func SendMsg(roomId int64, msg string, busChan chan getter.DanmuMsg) {
-	if bc == nil { // 未登录时 sender 没起来
-		busChan <- getter.DanmuMsg{Author: "system", Content: "未登录，发不出弹幕（按 F2 扫码登录）"}
+	if bc == nil { // 未登录或发送端没起来
+		busChan <- getter.DanmuMsg{Author: "system", Content: "发不出弹幕：发送端未就绪（网络或登录问题）"}
 		return
 	}
 	msgRune := []rune(msg)
@@ -44,19 +32,19 @@ func SendMsg(roomId int64, msg string, busChan chan getter.DanmuMsg) {
 }
 
 func Run() {
-	retry := 0
-	for ; retry < 3; retry++ {
+	for retry := 0; retry < 3; retry++ {
 		bc, err = bg.NewBiliClient(&bg.BiliSetting{
 			Auth:      &config.Auth,
 			DebugMode: false,
 		})
 		if err == nil {
-			break
+			return
 		}
 		time.Sleep(time.Second * 1)
 	}
-	if retry == 3 {
-		os.Exit(0)
-	}
-	go heartbeat()
+	// 三次都起不来（网络不通 / 登录失效）时不能像以前那样 os.Exit(0)：
+	// 那会把整个 TUI 一起静静地带走，屏幕上什么都不剩，看起来就是「打不开」。
+	// 现在留 bc == nil，发弹幕时 SendMsg 会提示，30 秒后再自己试一次。
+	// ponytail: 固定 30s 退避，跟 getter 一致；要更快就改指数退避。
+	time.AfterFunc(time.Second*30, Run)
 }

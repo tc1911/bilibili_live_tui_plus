@@ -313,7 +313,6 @@ func supervisor(busChan chan DanmuMsg, roomInfoChan chan RoomInfo) {
 	dc := DanmuClient{
 		roomID:        uint32(config.Config.RoomId),
 		auth:          config.Auth,
-		conn:          new(websocket.Conn),
 		unzlibChannel: make(chan []byte, 100),
 	}
 
@@ -325,7 +324,11 @@ func supervisor(busChan chan DanmuMsg, roomInfoChan chan RoomInfo) {
 			Time:    time.Now(),
 		}
 		dc.isClosed = true
-		if dc.conn != nil { // 没连上时 conn 是 nil，直接关会 panic
+		// connect() 里任何一步失败（改 nav / wbi / getDanmuInfo）都是提前 return，
+		// 从来不会走到赋值 conn 那行，所以这里 conn 可能是 nil。
+		// 以前结构体里塞了 new(websocket.Conn) 当占位，非 nil 但内部 net.Conn 是空的，
+		// 这个判断拦不住，Close() 就 nil 崩了。
+		if dc.conn != nil {
 			dc.conn.Close()
 		}
 		time.Sleep(1 * time.Second)
