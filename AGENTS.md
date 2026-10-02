@@ -35,7 +35,10 @@ getter/          弹幕长连接（websocket + 二进制协议），断线自动
 live/            B 站 API 客户端：扫码登录、分区表、开播取推流码、下播
 sender/          发弹幕（走 biligo）
 ui/ui.go         按 config.Config.Theme 分发到 theme1~4
-ui/themeN/       四套主题，各自 ui.go（画）+ handler.go（收 channel）
+ui/themeN/       四套老主题，各自 ui.go（画）+ handler.go（收 channel）
+ui/theme5/       新版主界面（-t 5）：标题栏 + 封面预览 + 观众列表 + 推流状态
+ui/cover/        把封面画进终端：抓图 -> 区域平均缩图 -> 半格字符上色（跟二维码一个套路）
+version/         版本号，打包时用 -ldflags -X 注入，本地 go build 是 dev
 ui/control/      叠在主题之上的控制面板：F2 登录 / F3 分区 / F4 开播 / F5 下播 / F6 直播间信息 / Esc
                  面板每次露出来都走 autoFill：没登录直接摆二维码、登录了就拉分区树，
                  F2 / F3 只是手动重来一次（loggedIn / loginPending / areasPending 三个 atomic 管并发）
