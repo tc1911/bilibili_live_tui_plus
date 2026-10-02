@@ -426,38 +426,36 @@ func (p *panel) pickArea(node *tview.TreeNode) {
 
 // ---------------------------------------------------------------- 改标题
 
-// buildTitle 是「改标题」那一页：输入框居中，下面一行提示。
-// 单独占一页而不是塞进信息栏：标题能有 40 个字，挤在四行的框里看不全也改不了。
-func (p *panel) buildTitle() *tview.Flex {
+// buildInputPage 拼一个居中的单行输入页：输入框 + 一行提示。
+// 标题页和封面页长得一模一样，只有边框标题、标签、提示语和回车后的动作不同。
+// accept 传 nil 表示不限字符。
+func (p *panel) buildInputPage(border, label, tip string, accept func(string, rune) bool, onEnter func(string)) (*tview.Flex, *tview.InputField) {
 	bg := bgColor()
 
-	p.titleInput = tview.NewInputField()
-	p.titleInput.SetLabel(" 标题: ")
-	p.titleInput.SetBackgroundColor(bg)
-	p.titleInput.SetFieldBackgroundColor(bg)
-	// 超长在这里就拦下，省得回车后只能收到服务端一句看不懂的报错。
-	p.titleInput.SetAcceptanceFunc(func(text string, _ rune) bool {
-		return utf8.RuneCountInString(text) < maxTitleRunes
-	})
+	field := tview.NewInputField()
+	field.SetLabel(label)
+	field.SetBackgroundColor(bg)
+	field.SetFieldBackgroundColor(bg)
+	field.SetAcceptanceFunc(accept)
 	// 取值留在事件循环里做，再交给 goroutine：输入框只由事件循环改，跨 goroutine 读是脏的。
-	p.titleInput.SetDoneFunc(func(key tcell.Key) {
+	field.SetDoneFunc(func(key tcell.Key) {
 		if key == tcell.KeyEnter {
-			go p.applyTitle(strings.TrimSpace(p.titleInput.GetText()))
+			onEnter(strings.TrimSpace(field.GetText()))
 		}
 	})
 
-	box := tview.NewFlex().AddItem(p.titleInput, 0, 1, true)
-	box.SetBorder(true).SetTitle(" 改直播间标题 ")
+	box := tview.NewFlex().AddItem(field, 0, 1, true)
+	box.SetBorder(true).SetTitle(border)
 	box.SetBackgroundColor(bg)
 
-	tip := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
-	tip.SetText(fmt.Sprintf("[yellow]回车提交，Esc 取消；上限 %d 字[-]", maxTitleRunes))
-	tip.SetBackgroundColor(bg)
+	note := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
+	note.SetText(tip)
+	note.SetBackgroundColor(bg)
 
 	col := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(nil, 0, 1, false).
 		AddItem(box, 3, 0, true).
-		AddItem(tip, 1, 0, false).
+		AddItem(note, 1, 0, false).
 		AddItem(nil, 0, 1, false)
 
 	page := tview.NewFlex().
@@ -465,6 +463,21 @@ func (p *panel) buildTitle() *tview.Flex {
 		AddItem(col, 60, 0, true).
 		AddItem(nil, 0, 1, false)
 	page.SetBackgroundColor(bg)
+	return page, field
+}
+
+// buildTitle 是「改标题」那一页。
+// 单独占一页而不是塞进信息栏：标题能有 40 个字，挤在四行的框里看不全也改不了。
+func (p *panel) buildTitle() *tview.Flex {
+	page, field := p.buildInputPage(
+		" 改直播间标题 ",
+		" 标题: ",
+		fmt.Sprintf("[yellow]回车提交，Esc 取消；上限 %d 字[-]", maxTitleRunes),
+		// 超长在这里就拦下，省得回车后只能收到服务端一句看不懂的报错。
+		func(text string, _ rune) bool { return utf8.RuneCountInString(text) < maxTitleRunes },
+		func(title string) { go p.applyTitle(title) },
+	)
+	p.titleInput = field
 	return page
 }
 
