@@ -36,7 +36,7 @@ live/            B 站 API 客户端：扫码登录、分区表、开播取推�
 sender/          发弹幕（走 biligo）
 ui/ui.go         按 config.Config.Theme 分发到 theme1~4
 ui/themeN/       四套主题，各自 ui.go（画）+ handler.go（收 channel）
-ui/control/      叠在主题之上的控制面板：F2 登录 / F3 分区 / F4 开播 / F5 下播 / F6 改标题 / F7 改封面 / Esc
+ui/control/      叠在主题之上的控制面板：F2 登录 / F3 分区 / F4 开播 / F5 下播 / F6 直播间信息 / Esc
 ```
 
 数据流是单向的，别绕开：
@@ -70,19 +70,25 @@ B 站 2025-05-26 起对 `getDanmuInfo` 强制 WBI 签名，缺签名一律返 `-
 `live/client.go` 里的 `appKey` / `appSec` 是**直播姬（bilibili link）的**，开播相关接口只能用这对，
 和 web 端的 WBI 是两套东西。`encodeParams(..., sign=true)` 会自动追加 appkey 与 md5 签名。
 
-### 4. Esc 是全局 InputCapture，抢在焦点分发之前
+### 4. 独立页面要自带状态行
+
+信息页、推流码页这些是 `Pages` 里独立的一页，**盖在**控制面板上。面板底部那行 hint
+此刻根本看不见 —— 往那儿写「正在上传」「改标题失败」，用户一个字都读不到。
+页面自己的状态行（`panel.status`）才显示得出来。
+
+### 5. Esc 是全局 InputCapture，抢在焦点分发之前
 
 `ui/control/control.go` 的 `onKey` 跑得比 tview 的按键分发早，所以判断顺序很讲究：
 确认弹窗 > 推流码页 > 面板。`focused()` **不能**写成「焦点不在 main 就算面板」——
 弹窗的按钮恰好也不在 main，那样 Esc 会关掉面板、把弹窗连焦点留在屏上变成死界面。
 
-### 5. 分区树：父节点不可选，左右键要自己处理
+### 6. 分区树：父节点不可选，左右键要自己处理
 
 tview 的上下键只停在可选节点，父分区不可选就会被整段跳过（用户卡过的坑）；
 左右键在 tview 里只移动选中项，展开 / 收起得靠 `treeKeyCapture` 自己拦，
 并且**在已经展开 / 收起之后要把事件交回去**，否则人回不到父分区。
 
-### 6. 封面必须先落到 B 站图床
+### 7. 封面必须先落到 B 站图床
 
 `UpdatePreLiveInfo` 的 `cover` 只认 `.hdslb.com` 下的图片地址，别处来的链接一律回 `100402`，
 所以「改封面」是两步：`UploadImage` 传图床拿地址 → `UpdateCover` 更新。
@@ -92,14 +98,14 @@ tview 的上下键只停在可选节点，父分区不可选就会被整段跳�
 - `bucket` 取 `openplatform`；换别的桶可能被拒
 - `UpdatePreLiveInfo` 虽然挂在 `app-blink` 下，网页端只带 csrf 就能过，**不要**给它加 app 签名
 
-### 7. 配置写入
+### 8. 配置写入
 
 - 路径固定在 `~/.config/bili/config.toml`（用 `os/user` 取 home，不是 `$HOME`）
 - `config.Save()` 写回 `config.ConfigFile`，登录 / 选分区后调用
 - `config.toml` 在 `.gitignore` 里，**永远不要**把它或里面的 Cookie 提交上去
 - Cookie 只在本地文件里流转，不要打印到日志
 
-### 8. locale 会重执行一次
+### 9. locale 会重执行一次
 
 `main.go` 的 `fixCharset`：`LANG` 是中日韩泰印地语系时把自己 `LANG=C.UTF-8` 重新 exec 一遍，
 好让 tview 正确算宽字符宽度。改启动流程时别把这个丢了，也别在里面加副作用。

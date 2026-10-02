@@ -45,8 +45,10 @@ type panel struct {
 	hint    *tview.TextView
 	tree    *tview.TreeView
 
-	titleInput *tview.InputField // 改标题那一页的输入框
-	coverInput *tview.InputField // 改封面那一页的输入框
+	// 直播间信息页（标题 / 封面）的三件套
+	editTitle *tview.InputField
+	editCover *tview.InputField
+	status    *tview.TextView // 页面自己的状态行：面板的 hint 被这页盖着，看不见
 
 	mu      sync.Mutex // 串行化接口调用
 	qrGen   int        // 递增即作废旧的扫码轮询
@@ -68,8 +70,7 @@ func Wrap(app *tview.Application, root tview.Primitive, onLogin func()) *tview.P
 		AddPage("main", root, true, true).
 		AddPage("control", p.build(), true, false).
 		AddPage("streams", p.streams, true, false).
-		AddPage("title", p.buildTitle(), true, false).
-		AddPage("cover", p.buildCover(), true, false)
+		AddPage("edit", p.buildEdit(), true, false)
 	p.pages.SetBackgroundColor(bgColor())
 	app.SetInputCapture(p.onKey)
 
@@ -149,9 +150,7 @@ func (p *panel) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		p.show()
 		go p.stopLive()
 	case tcell.KeyF6:
-		p.openTitle()
-	case tcell.KeyF7:
-		p.openCover()
+		p.openEdit()
 	case tcell.KeyEscape:
 		// 确认弹窗开着时 Esc 归它。必须先判：全局 capture 跑在焦点分发之前，
 		// 底下那两个分支会把 Esc 当成「关面板」，弹窗就被连人带焦点丢在屏上。
@@ -159,12 +158,8 @@ func (p *panel) onKey(ev *tcell.EventKey) *tcell.EventKey {
 			p.closeConfirm()
 			return nil
 		}
-		if p.pages.HasPage("title") && p.app.GetFocus() == p.titleInput {
-			p.closeTitle()
-			return nil
-		}
-		if p.pages.HasPage("cover") && p.app.GetFocus() == p.coverInput {
-			p.closeCover()
+		if p.pages.HasPage("edit") && p.editFocused() {
+			p.closeEdit()
 			return nil
 		}
 		if p.pages.HasPage("streams") && p.app.GetFocus() == p.streams {
@@ -209,7 +204,7 @@ func (p *panel) setInfo() {
 		area = "未选择（F3）"
 	}
 	p.info.SetText(fmt.Sprintf(
-		"[white]账号:[-] %s\n[white]直播间:[-] %d\n[white]分区:[-] %s\n[white]按键:[-] F2 登录  F3 分区  F4 开播  F5 下播  F6 改标题  F7 改封面  Esc 关闭",
+		"[white]账号:[-] %s\n[white]直播间:[-] %d\n[white]分区:[-] %s\n[white]按键:[-] F2 登录  F3 分区  F4 开播  F5 下播  F6 直播间信息  Esc 关闭",
 		p.account, config.Config.RoomId, area))
 }
 
@@ -434,74 +429,90 @@ func (p *panel) pickArea(node *tview.TreeNode) {
 	p.setHint("开播分区已设为 " + ref.Name)
 }
 
-// ---------------------------------------------------------------- 改标题
+// ---------------------------------------------------------------- 直播间信息
 
-// buildInputPage 拼一个居中的单行输入页：输入框 + 一行提示。
-// 标题页和封面页长得一模一样，只有边框标题、标签、提示语和回车后的动作不同。
-// accept 传 nil 表示不限字符。
-func (p *panel) buildInputPage(border, label, tip string, accept func(string, rune) bool, onEnter func(string)) (*tview.Flex, *tview.InputField) {
+// buildEdit 把「改标题」和「改封面」放在同一页。
+// 两件事都是设置直播间，拆成两个快捷键只会让人来回切页面、还容易漏看一个。
+func (p *panel) buildEdit() *tview.Flex {
 	bg := bgColor()
 
-	field := tview.NewInputField()
-	field.SetLabel(label)
-	field.SetBackgroundColor(bg)
-	field.SetFieldBackgroundColor(bg)
-	field.SetAcceptanceFunc(accept)
-	// 取值留在事件循环里做，再交给 goroutine：输入框只由事件循环改，跨 goroutine 读是脏的。
-	field.SetDoneFunc(func(key tcell.Key) {
-		if key == tcell.KeyEnter {
-			onEnter(strings.TrimSpace(field.GetText()))
+	p.editTitle = tview.NewInputField().SetLabel("标题: ")
+	p.editCover = tview.NewInputField().SetLabel("封面: ")
+	for _, f := range []*tview.InputField{p.editTitle, p.editCover} {
+		f.SetBackgroundColor(bg)
+		f.SetFieldBackgroundColor(bg)
+	}
+	// 标题上限 40 字符，超了服务端只会回一句看不懂的报错，这里先拦住。
+	p.editTitle.SetAcceptanceFunc(func(text string, _ rune) bool {
+		return utf8.RuneCountInString(text) < maxTitleRunes
+	})
+
+	// InputField 在 Enter/Tab/Backtab 上都会回调 done（tview 的 finish()），
+	// 所以切焦点也放这儿，不用另外挂 InputCapture。
+	p.editTitle.SetDoneFunc(func(key tcell.Key) {
+		switch key {
+		case tcell.KeyTab, tcell.KeyBacktab:
+			p.app.SetFocus(p.editCover)
+		case tcell.KeyEnter:
+			title := strings.TrimSpace(p.editTitle.GetText())
+			// 房间号在事件循环里读好再交出去，别让后台 goroutine 去摸全局 config。
+			roomID := config.Config.RoomId
+			go p.submitTitle(roomID, title)
+		}
+	})
+	p.editCover.SetDoneFunc(func(key tcell.Key) {
+		switch key {
+		case tcell.KeyTab, tcell.KeyBacktab:
+			p.app.SetFocus(p.editTitle)
+		case tcell.KeyEnter:
+			go p.submitCover(strings.TrimSpace(p.editCover.GetText()))
 		}
 	})
 
-	box := tview.NewFlex().AddItem(field, 0, 1, true)
-	box.SetBorder(true).SetTitle(border)
+	p.status = tview.NewTextView().SetDynamicColors(true)
+	p.status.SetBackgroundColor(bg)
+
+	box := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(p.editTitle, 1, 0, true).
+		AddItem(p.editCover, 1, 0, false).
+		AddItem(nil, 1, 0, false).
+		AddItem(p.status, 2, 0, false)
+	box.SetBorder(true).SetTitle(" 直播间信息 ")
 	box.SetBackgroundColor(bg)
 
-	note := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
-	note.SetText(tip)
-	note.SetBackgroundColor(bg)
+	tip := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
+	tip.SetText("[yellow]Tab 切换，回车提交当前这一项；Esc 返回面板[-]")
+	tip.SetBackgroundColor(bg)
 
 	col := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(nil, 0, 1, false).
-		AddItem(box, 3, 0, true).
-		AddItem(note, 1, 0, false).
+		AddItem(box, 7, 0, true).
+		AddItem(tip, 1, 0, false).
 		AddItem(nil, 0, 1, false)
 
 	page := tview.NewFlex().
 		AddItem(nil, 0, 1, false).
-		AddItem(col, 60, 0, true).
+		AddItem(col, 70, 0, true).
 		AddItem(nil, 0, 1, false)
 	page.SetBackgroundColor(bg)
-	return page, field
-}
-
-// buildTitle 是「改标题」那一页。
-// 单独占一页而不是塞进信息栏：标题能有 40 个字，挤在四行的框里看不全也改不了。
-func (p *panel) buildTitle() *tview.Flex {
-	page, field := p.buildInputPage(
-		" 改直播间标题 ",
-		" 标题: ",
-		fmt.Sprintf("[yellow]回车提交，Esc 取消；上限 %d 字[-]", maxTitleRunes),
-		// 超长在这里就拦下，省得回车后只能收到服务端一句看不懂的报错。
-		func(text string, _ rune) bool { return utf8.RuneCountInString(text) < maxTitleRunes },
-		func(title string) { go p.applyTitle(title) },
-	)
-	p.titleInput = field
 	return page
 }
 
-// openTitle 由事件循环调用：先把页面亮出来，再让后台去取当前标题。
+// editFocused 焦点是否在信息页的输入框上。
+// 跟 focused() 一样，不能写成「焦点不在 main 就算」：确认弹窗的按钮也不在 main。
+func (p *panel) editFocused() bool {
+	f := p.app.GetFocus()
+	return f == p.editTitle || f == p.editCover
+}
+
+// openEdit 由事件循环调用：先把页面亮出来，再让后台去取当前标题。
 // 取标题要走网络，放事件循环里会把整个 TUI 冻住。
-func (p *panel) openTitle() {
+func (p *panel) openEdit() {
 	p.show()
-	p.pages.ShowPage("title")
-	p.app.SetFocus(p.titleInput)
-	p.setHint("正在读取当前标题…")
-	// 房间号在事件循环里读好再交出去：后台 goroutine 摸全局 config 会跟
-	// 登录/选分区时写 config 的代码撞车（-race 能抓出来）。
-	roomID := config.Config.RoomId
-	go p.loadTitle(roomID)
+	p.pages.ShowPage("edit")
+	p.app.SetFocus(p.editTitle)
+	p.status.SetText("[yellow]封面填本地图片路径或 .hdslb.com 链接，留空表示不改[-]")
+	go p.loadTitle(config.Config.RoomId)
 }
 
 func (p *panel) loadTitle(roomID int64) {
@@ -512,78 +523,44 @@ func (p *panel) loadTitle(roomID int64) {
 	p.update(func() {
 		if err != nil {
 			// 读不到不等于改不了，输入框照用。
-			p.setHint("读取当前标题失败，可以直接输入新标题: " + err.Error())
+			p.setStatus("[red]读取当前标题失败，可以直接输入新标题: " + err.Error() + "[-]")
 			return
 		}
 		// 慢网下用户可能已经敲上了，别把人家打的字冲掉。
-		if p.titleInput.GetText() == "" {
-			p.titleInput.SetText(room.Title)
+		if p.editTitle.GetText() == "" {
+			p.editTitle.SetText(room.Title)
 		}
-		p.setHint(fmt.Sprintf("回车提交，Esc 取消；上限 %d 字", maxTitleRunes))
 	})
 }
 
-func (p *panel) applyTitle(title string) {
+func (p *panel) submitTitle(roomID int64, title string) {
 	if title == "" {
-		p.update(func() { p.setHint("标题不能为空") })
+		p.setStatus("[red]标题不能为空[-]")
 		return
 	}
+	p.setStatus("正在提交标题…")
 
 	p.mu.Lock()
-	err := p.client.UpdateTitle(config.Config.RoomId, title)
+	err := p.client.UpdateTitle(roomID, title)
 	p.mu.Unlock()
 
-	p.update(func() {
-		if err != nil {
-			p.setHint("改标题失败: " + err.Error())
-			return
-		}
-		p.closeTitle()
-		p.setHint("标题已改为「" + title + "」")
-	})
+	if err != nil {
+		p.setStatus("[red]改标题失败: " + err.Error() + "[-]")
+		return
+	}
+	p.setStatus("标题已提交，生效要等几秒")
 }
 
-// closeTitle 收起标题页并把焦点还给分区树，跟关确认弹窗一个道理：
-// 焦点留在输入框上，面板看着还在、实际按什么都没反应。
-func (p *panel) closeTitle() {
-	p.pages.HidePage("title")
-	p.pages.ShowPage("control")
-	p.app.SetFocus(p.tree)
-}
-
-// ---------------------------------------------------------------- 改封面
-
-// buildCover 是「改封面」那一页。输入框既收本地路径也收链接：
-// 传图那步会失败的时候（图太大、格式不对），用户还能把已经传好的图贴进来。
-func (p *panel) buildCover() *tview.Flex {
-	page, field := p.buildInputPage(
-		" 改直播间封面 ",
-		" 图片: ",
-		"[yellow]填本地图片路径，或已经传好的 .hdslb.com 链接；回车提交，Esc 取消[-]",
-		nil, // 路径不做字符限制
-		func(src string) { go p.applyCover(src) },
-	)
-	p.coverInput = field
-	return page
-}
-
-func (p *panel) openCover() {
-	p.show()
-	p.pages.ShowPage("cover")
-	p.app.SetFocus(p.coverInput)
-	p.setHint("填本地图片路径，回车后先传到 B 站图床（几 MB 的图要等一会儿）")
-}
-
-func (p *panel) applyCover(src string) {
+func (p *panel) submitCover(src string) {
 	if src == "" {
-		p.update(func() { p.setHint("先填图片路径，或已经传好的 .hdslb.com 链接") })
+		p.setStatus("[yellow]封面留空，没有改动[-]")
 		return
 	}
 
-	p.update(func() { p.setHint("正在处理 " + filepath.Base(src) + " …") })
+	p.setStatus("正在处理 " + filepath.Base(src) + " …")
 	cover, err := p.uploadIfLocal(src)
 	if err != nil {
-		p.update(func() { p.setHint("上传失败: " + err.Error()) })
+		p.setStatus("[red]上传失败: " + err.Error() + "[-]")
 		return
 	}
 
@@ -591,14 +568,11 @@ func (p *panel) applyCover(src string) {
 	err = p.client.UpdateCover(cover)
 	p.mu.Unlock()
 
-	p.update(func() {
-		if err != nil {
-			p.setHint("改封面失败: " + err.Error())
-			return
-		}
-		p.closeCover()
-		p.setHint("封面已提交，生效要等几秒")
-	})
+	if err != nil {
+		p.setStatus("[red]改封面失败: " + err.Error() + "[-]")
+		return
+	}
+	p.setStatus("封面已提交，生效要等几秒")
 }
 
 // uploadIfLocal 填的已经是链接就直接用，否则当本地路径传图床 —— 封面只认
@@ -626,8 +600,16 @@ func expandHome(path string) string {
 	return filepath.Join(home, strings.TrimPrefix(path, "~"))
 }
 
-func (p *panel) closeCover() {
-	p.pages.HidePage("cover")
+// setStatus 写页面自己的状态行。不能用面板底部那行 hint —— 这页盖在面板上，
+// 面板的 hint 此刻根本看不见，之前的进度和报错就是这么被吞掉的。
+func (p *panel) setStatus(text string) {
+	p.update(func() { p.status.SetText(text) })
+}
+
+// closeEdit 收起信息页，把焦点还给分区树。
+// 焦点留在输入框上，面板看着还在、按什么都没反应。
+func (p *panel) closeEdit() {
+	p.pages.HidePage("edit")
 	p.pages.ShowPage("control")
 	p.app.SetFocus(p.tree)
 }

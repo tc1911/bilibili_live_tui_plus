@@ -155,9 +155,9 @@ func TestConfirmModalEsc(t *testing.T) {
 	}
 }
 
-// 标题页是独立的一页，Esc 必须只关它、把焦点还给分区树。
+// 信息页盖在面板之上，Esc 必须先关它、把焦点还给分区树。
 // 判断顺序写错就会先关掉整个面板，输入框跟着人一起消失。
-func TestTitlePageEsc(t *testing.T) {
+func TestEditPageEsc(t *testing.T) {
 	config.Config.Background = "NONE"
 	app := tview.NewApplication()
 	main := tview.NewBox()
@@ -165,21 +165,21 @@ func TestTitlePageEsc(t *testing.T) {
 	p.pages = tview.NewPages().
 		AddPage("main", main, true, true).
 		AddPage("control", p.build(), true, true).
-		AddPage("title", p.buildTitle(), true, false)
+		AddPage("edit", p.buildEdit(), true, false)
 	app.SetInputCapture(p.onKey)
 	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
 
 	p.onKey(tcell.NewEventKey(tcell.KeyF6, 0, tcell.ModNone))
-	if app.GetFocus() != p.titleInput {
+	if app.GetFocus() != p.editTitle {
 		t.Fatalf("F6 后焦点 = %T，want 标题输入框", app.GetFocus())
 	}
 
-	// 第一下 Esc：关标题页，控制面板还在。
+	// 第一下 Esc：关信息页，控制面板还在。
 	if got := p.onKey(esc); got != nil {
-		t.Error("标题页开着时 Esc 该被吞掉（关它）")
+		t.Error("信息页开着时 Esc 该被吞掉（关它）")
 	}
 	if app.GetFocus() != p.tree {
-		t.Errorf("关掉标题页后焦点 = %T，want 分区树（否则整个面板被一起关了）", app.GetFocus())
+		t.Errorf("关掉信息页后焦点 = %T，want 分区树（否则整个面板被一起关了）", app.GetFocus())
 	}
 
 	// 第二下 Esc：面板还在，关掉它。
@@ -190,7 +190,7 @@ func TestTitlePageEsc(t *testing.T) {
 }
 
 // 信息栏是带边框的盒子，可用高度 = 高度 - 2。之前定成 5 行只装得下 3 行文字，
-// 「按键: F2 登录 …」那行被静默吃掉，界面上完全看不出 F2~F7 是干什么的。
+// 「按键: F2 登录 …」那行被静默吃掉，界面上完全看不出 F2~F6 是干什么的。
 func TestInfoShowsKeyHints(t *testing.T) {
 	config.Config.Background = "NONE"
 	config.Config.RoomId = 23333333
@@ -229,34 +229,34 @@ func TestInfoShowsKeyHints(t *testing.T) {
 	}
 }
 
-// 封面页跟标题页一样是独立一页，Esc 只能关它自己、把焦点还给分区树。
-func TestCoverPageEsc(t *testing.T) {
+// 标题和封面挤在同一页上，Tab 必须能把焦点挪到下一项 ——
+// 挪不动的话封面那一栏就永远够不着，等于白加。
+func TestEditPageTabSwitches(t *testing.T) {
 	config.Config.Background = "NONE"
 	app := tview.NewApplication()
-	main := tview.NewBox()
-	p := &panel{app: app, main: main, client: live.NewClient(""), onLogin: func() {}}
+	p := &panel{app: app, main: tview.NewBox(), client: live.NewClient(""), onLogin: func() {}}
 	p.pages = tview.NewPages().
-		AddPage("main", main, true, true).
+		AddPage("main", p.main, true, true).
 		AddPage("control", p.build(), true, true).
-		AddPage("cover", p.buildCover(), true, false)
-	app.SetInputCapture(p.onKey)
-	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
+		AddPage("edit", p.buildEdit(), true, true)
+	app.SetFocus(p.editTitle)
 
-	p.onKey(tcell.NewEventKey(tcell.KeyF7, 0, tcell.ModNone))
-	if app.GetFocus() != p.coverInput {
-		t.Fatalf("F7 后焦点 = %T，want 封面输入框", app.GetFocus())
-	}
+	// InputField 只在 Enter/Tab/Backtab 上调 done，所以这里直接喂按键。
+	tab := tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
+	backtab := tcell.NewEventKey(tcell.KeyBacktab, 0, tcell.ModNone)
+	noop := func(tview.Primitive) {}
 
-	if got := p.onKey(esc); got != nil {
-		t.Error("封面页开着时 Esc 该被吞掉（关它）")
+	p.editTitle.InputHandler()(tab, noop)
+	if app.GetFocus() != p.editCover {
+		t.Fatalf("标题上按 Tab 后焦点 = %T，want 封面输入框", app.GetFocus())
 	}
-	if app.GetFocus() != p.tree {
-		t.Errorf("关掉封面页后焦点 = %T，want 分区树", app.GetFocus())
+	p.editCover.InputHandler()(tab, noop)
+	if app.GetFocus() != p.editTitle {
+		t.Errorf("封面上按 Tab 后焦点 = %T，want 标题输入框", app.GetFocus())
 	}
-
-	p.onKey(esc)
-	if app.GetFocus() != p.main {
-		t.Errorf("再按 Esc 该关掉面板，焦点 = %T", app.GetFocus())
+	p.editTitle.InputHandler()(backtab, noop)
+	if app.GetFocus() != p.editCover {
+		t.Errorf("标题上按 Shift+Tab 后焦点 = %T，want 封面输入框", app.GetFocus())
 	}
 }
 
