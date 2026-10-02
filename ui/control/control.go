@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -61,6 +62,12 @@ type panel struct {
 	mu      sync.Mutex // 串行化接口调用
 	qrGen   int        // 递增即作废旧的扫码轮询
 	account string
+
+	// 下面三个给「需要什么显示什么」用：autoFill 在事件循环里跑，
+	// 而它们由后台 goroutine 改，普通 bool 会撞车，所以用 atomic。
+	loggedIn     atomic.Bool
+	loginPending atomic.Bool // 正在等扫码，别再生一张二维码
+	areasPending atomic.Bool // 正在拉分区列表
 }
 
 // Wrap 把主题根组件包进 Pages 并挂上全局快捷键。
@@ -71,7 +78,7 @@ func Wrap(app *tview.Application, root tview.Primitive, onLogin func()) *tview.P
 		main:    root,
 		client:  live.NewClient(config.Config.Cookie),
 		onLogin: onLogin,
-		account: "未登录（F2 扫码登录）",
+		account: "未登录（扫右边的二维码）",
 	}
 
 	p.toast = tview.NewModal()
@@ -86,10 +93,13 @@ func Wrap(app *tview.Application, root tview.Primitive, onLogin func()) *tview.P
 
 	p.setInfo()
 	if p.client.LoggedIn() {
+		p.loggedIn.Store(true)
 		go p.refreshAccount()
 	} else {
-		p.setHint("未登录：按 F2 用哔哩哔哩 App 扫码")
+		p.setHint("未登录：二维码已经摆出来了，用哔哩哔哩 App 扫一下")
 		p.pages.ShowPage("control")
+		// 没登录就把二维码直接摆出来，别让人先去找 F2。
+		p.autoFill()
 	}
 	return p.pages
 }
@@ -201,6 +211,21 @@ func (p *panel) show() {
 	if p.pages.HasPage("control") {
 		p.app.SetFocus(p.tree)
 	}
+	p.autoFill()
+}
+
+// autoFill 让面板「需要什么显示什么」：没登录就直接把二维码摆出来，不用先找 F2；
+// 登录了就顺手把分区列表拉出来，不用先找 F3。两件都在后台跑，不挡界面。
+// F2 / F3 仍然在，想手动重来一次就用它们。
+func (p *panel) autoFill() {
+	if !p.loggedIn.Load() {
+		go p.login()
+		return
+	}
+	// 树已经在屏幕上就别再打一次接口 —— 面板每次露出来都会走到这儿。
+	if p.tree.GetRoot() == nil {
+		go p.loadAreas()
+	}
 }
 
 // focused 焦点是否在面板自己的控件上。
@@ -267,6 +292,8 @@ func (p *panel) refreshAccount() {
 			p.account = "登录态失效（F2 重新扫码）"
 			p.setInfo()
 			p.setHint(err.Error())
+			p.loggedIn.Store(false)
+			p.autoFill()
 		})
 		return
 	}
@@ -277,6 +304,12 @@ func (p *panel) refreshAccount() {
 }
 
 func (p *panel) login() {
+	// 已经在等扫码了就别再生成一张：屏幕上两张二维码，用户扫了哪张都说不清。
+	if p.loginPending.Swap(true) {
+		return
+	}
+	defer p.loginPending.Store(false)
+
 	p.mu.Lock()
 	if p.client.LoggedIn() {
 		if mid, uname, err := p.client.Nav(); err == nil {
@@ -364,6 +397,7 @@ func (p *panel) finishLogin() {
 
 	p.update(func() {
 		p.account = fmt.Sprintf("%s (uid %d)", uname, mid)
+		p.loggedIn.Store(true)
 		p.hideSide()
 		p.setInfo()
 		switch {
@@ -375,12 +409,20 @@ func (p *panel) finishLogin() {
 		default:
 			p.setHint(fmt.Sprintf("登录成功，弹幕连接中。你的直播间: %d", ownRoom))
 		}
+		// 登录完顺手把分区列表拉出来，省得再按一次 F3。
+		p.autoFill()
 	})
 }
 
 // ---------------------------------------------------------------- 分区
 
 func (p *panel) loadAreas() {
+	// 同一时刻只拉一次：面板自动补内容和用户按 F3 可能一起来。
+	if p.areasPending.Swap(true) {
+		return
+	}
+	defer p.areasPending.Store(false)
+
 	p.mu.Lock()
 	areas, err := p.client.Areas()
 	p.mu.Unlock()
