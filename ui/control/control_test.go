@@ -328,3 +328,43 @@ func TestEscAtBottomNotifies(t *testing.T) {
 		t.Error("第二下 Esc 没把提示收掉")
 	}
 }
+
+// 右栏（扫码）只在有内容时才该占地方：空着还写死 46 列，分区树就被白白挤窄。
+// 宽字符在模拟屏幕上占两格、第二格是空的，所以边框标题取出来是「扫 码」。
+func TestSideBoxFollowsContent(t *testing.T) {
+	config.Config.Background = "NONE"
+	config.Config.RoomId = 23333333
+	config.Config.AreaName = ""
+
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(100, 30)
+
+	p := &panel{app: tview.NewApplication(), client: live.NewClient(""), onLogin: func() {}}
+	root := p.build()
+	p.setInfo()
+	root.SetRect(0, 0, 100, 30)
+
+	draw := func() string {
+		screen.Clear()
+		root.Draw(screen)
+		screen.Show()
+		return screenText(screen, 100, 30)
+	}
+
+	if strings.Contains(draw(), "扫 码") {
+		t.Error("扫码框空着也占了一栏")
+	}
+
+	p.showSide("[white]扫我[-]", 30)
+	if !strings.Contains(draw(), "扫 码") {
+		t.Error("扫码框有内容了却没露出来")
+	}
+
+	p.hideSide()
+	if strings.Contains(draw(), "扫 码") {
+		t.Error("扫码框收起来之后还占着地方")
+	}
+}

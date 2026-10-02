@@ -37,6 +37,8 @@ sender/          发弹幕（走 biligo）
 ui/ui.go         按 config.Config.Theme 分发到 theme1~4
 ui/themeN/       四套主题，各自 ui.go（画）+ handler.go（收 channel）
 ui/control/      叠在主题之上的控制面板：F2 登录 / F3 分区 / F4 开播 / F5 下播 / F6 直播间信息 / Esc
+                 右栏「扫码」按内容显隐（showSide / hideSide）：只有登录二维码、开播验证地址时
+                 才撑开，平时宽度全给分区树 —— 别再写死成 46 列
 ```
 
 数据流是单向的，别绕开：

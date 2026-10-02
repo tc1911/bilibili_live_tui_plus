@@ -31,6 +31,10 @@ const defaultRoomID int64 = 23333333
 // maxTitleRunes 是服务端给的标题上限（bilibili-API-collect 的 live/manage.md）。
 const maxTitleRunes = 40
 
+// defaultSideWidth 是右栏在「有内容但算不出宽度」时的兜底宽度（比如二维码生成失败，
+// 只剩一行验证地址可看）。
+const defaultSideWidth = 46
+
 type panel struct {
 	app     *tview.Application
 	pages   *tview.Pages
@@ -115,9 +119,11 @@ func (p *panel) build() *tview.Flex {
 	p.hint = tview.NewTextView().SetDynamicColors(true).SetWrap(true)
 	p.hint.SetBackgroundColor(bg)
 
+	// 右栏初始宽度 0：它只在扫码登录 / 开播需要验证时才有内容，
+	// 平时白白占掉 46 列，分区树反而被挤窄。有内容了 showSide 再把它撑开。
 	body := tview.NewFlex().
 		AddItem(p.tree, 0, 1, true).
-		AddItem(p.side, 46, 0, false)
+		AddItem(p.side, 0, 0, false)
 	body.SetBackgroundColor(bg)
 	p.body = body
 
@@ -358,7 +364,7 @@ func (p *panel) finishLogin() {
 
 	p.update(func() {
 		p.account = fmt.Sprintf("%s (uid %d)", uname, mid)
-		p.side.SetText("")
+		p.hideSide()
 		p.setInfo()
 		switch {
 		case navErr != nil:
@@ -740,7 +746,7 @@ func (p *panel) stopLive() {
 			p.setHint("下播失败: " + err.Error())
 			return
 		}
-		p.side.SetText("")
+		p.hideSide()
 		p.pages.HidePage("streams")
 		p.pages.ShowPage("control")
 		p.app.SetFocus(p.tree)
@@ -756,7 +762,7 @@ func (p *panel) stopLive() {
 func (p *panel) showQR(content, title string) {
 	code, err := qrcode.New(content, qrcode.Low)
 	if err != nil {
-		p.side.SetText("[white]" + title + "[-]\n\n" + content)
+		p.showSide("[white]"+title+"[-]\n\n"+content, 0)
 		return
 	}
 	bitmap := code.Bitmap() // 已含静默区
@@ -783,9 +789,26 @@ func (p *panel) showQR(content, title string) {
 	}
 
 	// 窄了会被 tview 截断 + 折行，二维码直接报废。留 2 列余量兜底。
-	width := len(bitmap[0]) + 4
-	if p.body != nil {
-		p.body.ResizeItem(p.side, width, 0)
+	p.showSide(b.String(), len(bitmap[0])+4)
+}
+
+// showSide 亮出右栏，并按内容给宽度。空内容请走 hideSide。
+func (p *panel) showSide(text string, width int) {
+	if p.body == nil {
+		return // 还没建好界面（测试里建一半的 panel）
 	}
-	p.side.SetText(b.String())
+	if width <= 0 {
+		width = defaultSideWidth
+	}
+	p.side.SetText(text)
+	p.body.ResizeItem(p.side, width, 0)
+}
+
+// hideSide 清掉右栏并把它收起来，宽度还给分区树。
+func (p *panel) hideSide() {
+	if p.body == nil {
+		return
+	}
+	p.side.SetText("")
+	p.body.ResizeItem(p.side, 0, 0)
 }
