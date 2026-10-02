@@ -45,6 +45,9 @@ type panel struct {
 	hint    *tview.TextView
 	tree    *tview.TreeView
 
+	toast    *tview.Modal // 浮在最上层的临时提示
+	toastGen int          // 递增作废旧的隐藏定时器
+
 	// 直播间信息页（标题 / 封面）的三件套
 	editTitle *tview.InputField
 	editCover *tview.InputField
@@ -66,11 +69,13 @@ func Wrap(app *tview.Application, root tview.Primitive, onLogin func()) *tview.P
 		account: "未登录（F2 扫码登录）",
 	}
 
+	p.toast = tview.NewModal()
 	p.pages = tview.NewPages().
 		AddPage("main", root, true, true).
 		AddPage("control", p.build(), true, false).
 		AddPage("streams", p.streams, true, false).
-		AddPage("edit", p.buildEdit(), true, false)
+		AddPage("edit", p.buildEdit(), true, false).
+		AddPage("toast", p.toast, true, false)
 	p.pages.SetBackgroundColor(bgColor())
 	app.SetInputCapture(p.onKey)
 
@@ -173,6 +178,9 @@ func (p *panel) onKey(ev *tcell.EventKey) *tcell.EventKey {
 			p.app.SetFocus(p.main)
 			return nil
 		}
+		// 走到这儿说明弹窗、信息页、推流码页、控制面板都不在，没有可返回的了。
+		// 此时按 Esc 必须给点反应，不然看着就像键坏了；退出是 Ctrl+C，不是 Esc。
+		p.showToast("按 Ctrl+C 退出")
 	}
 	return ev
 }
@@ -197,6 +205,24 @@ func (p *panel) focused() bool {
 
 // update 供后台 goroutine 改界面用；在事件循环里直接改会死锁。
 func (p *panel) update(fn func()) { p.app.QueueUpdateDraw(fn) }
+
+// showToast 在最上层浮一句提示，两秒后自己收。
+// 不能用控制面板那行 hint：这会儿面板已经收起，用户看不到它。
+// 也不能常驻：它正盖着弹幕。
+func (p *panel) showToast(text string) {
+	p.toastGen++
+	gen := p.toastGen
+	p.toast.SetText(text)
+	p.pages.ShowPage("toast")
+	// 连按 Esc 要重新计时，否则上一条的定时器会把新的一条提前收走。
+	time.AfterFunc(2*time.Second, func() {
+		p.update(func() {
+			if gen == p.toastGen {
+				p.pages.HidePage("toast")
+			}
+		})
+	})
+}
 
 func (p *panel) setInfo() {
 	area := config.Config.AreaName

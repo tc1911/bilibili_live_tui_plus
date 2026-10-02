@@ -209,17 +209,8 @@ func TestInfoShowsKeyHints(t *testing.T) {
 	root.Draw(screen)
 	screen.Show()
 
-	// 宽字符在模拟屏幕上占两格、第二格是空的，所以按 ASCII 关键字找整行。
 	found := false
-	for y := 0; y < 12 && !found; y++ {
-		row := ""
-		for x := 0; x < 120; x++ {
-			m, _, _, _ := screen.GetContent(x, y)
-			if m == 0 {
-				m = ' '
-			}
-			row += string(m)
-		}
+	for _, row := range strings.Split(screenText(screen, 120, 30), "\n") {
 		if strings.Contains(row, "Esc") && strings.Contains(row, "F5") {
 			found = true
 		}
@@ -227,6 +218,23 @@ func TestInfoShowsKeyHints(t *testing.T) {
 	if !found {
 		t.Error("信息栏里看不到按键提示（F5 / Esc 一行没被画出来）")
 	}
+}
+
+// screenText 把整屏拉成一段文本。宽字符在模拟屏幕上占两格、第二格是空的，
+// 所以调用方只按 ASCII 关键字找。
+func screenText(screen tcell.Screen, width, height int) string {
+	var b strings.Builder
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			m, _, _, _ := screen.GetContent(x, y)
+			if m == 0 {
+				m = ' '
+			}
+			b.WriteRune(m)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // 标题和封面挤在同一页上，Tab 必须能把焦点挪到下一项 ——
@@ -277,5 +285,38 @@ func TestExpandHome(t *testing.T) {
 		if got := expandHome(c.in); got != c.want {
 			t.Errorf("expandHome(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// 面板收起时（已登录就是这个状态）按 Esc 没有任何东西可关。
+// 以前是彻底没反应，看着像按键坏了 —— 得浮一句告诉用户退出靠 Ctrl+C。
+func TestEscAtBottomNotifies(t *testing.T) {
+	config.Config.Background = "NONE"
+	app := tview.NewApplication()
+	main := tview.NewBox()
+	p := &panel{app: app, main: main, client: live.NewClient(""), onLogin: func() {}}
+	p.toast = tview.NewModal()
+	p.pages = tview.NewPages().
+		AddPage("main", main, true, true).
+		AddPage("control", p.build(), true, false).
+		AddPage("toast", p.toast, true, false)
+	app.SetInputCapture(p.onKey)
+
+	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
+	if got := p.onKey(esc); got != esc {
+		t.Error("退到底的 Esc 该原样交给主题，别吞掉")
+	}
+
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(100, 30)
+	p.pages.SetRect(0, 0, 100, 30)
+	p.pages.Draw(screen)
+	screen.Show()
+
+	if !strings.Contains(screenText(screen, 100, 30), "Ctrl+C") {
+		t.Error("Esc 退到底时屏幕上没出现退出提示")
 	}
 }
