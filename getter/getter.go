@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/tc1911/bilibili_live_tui_plus/config"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	myhttp "github.com/BYT0723/go-tools/http"
@@ -162,16 +163,19 @@ func (d *DanmuClient) connect() (err error) {
 	return
 }
 
-var historied = false
+// historyShown 是进程级状态，不是连接级：重连再拉一遍会把同一批历史弹幕重放到屏幕上。
+// 用 CAS 而不是「先读后写」，万一两个连接短暂并存，也不至于两边各拉一份。
+var historyShown atomic.Bool
 
 func (d *DanmuClient) getHistory(busChan chan DanmuMsg) {
-	if historied {
+	if !historyShown.CompareAndSwap(false, true) {
 		return
 	}
 
 	historyApi := fmt.Sprintf("https://api.live.bilibili.com/xlive/web-room/v1/dM/gethistory?roomid=%d", d.roomID)
 	r, err := requests.Get(historyApi)
 	if err != nil {
+		historyShown.Store(false) // 没拉到，让下次重连再试
 		return
 	}
 
@@ -186,7 +190,6 @@ func (d *DanmuClient) getHistory(busChan chan DanmuMsg) {
 		}
 		busChan <- danmu
 	}
-	historied = true
 }
 
 func (d *DanmuClient) heartBeat(msgChan chan DanmuMsg) {
