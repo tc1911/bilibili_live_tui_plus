@@ -5,20 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tc1911/bilibili_live_tui_plus/config"
-
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/tc1911/bilibili_live_tui_plus/config"
 	"github.com/tc1911/bilibili_live_tui_plus/live"
 )
-
-func testAreas() []live.ParentArea {
-	return []live.ParentArea{
-		{Name: "网游", List: []live.SubArea{{ID: 1, Name: "英雄联盟"}, {ID: 2, Name: "DOTA2"}}},
-		{Name: "手游", List: []live.SubArea{{ID: 3, Name: "王者荣耀"}}},
-	}
-}
 
 // 用户报的“分区没法选择”：父分区不可选 + 默认全收起时，整棵树都点不动 ——
 // 上下键会整段跳过不可选节点，回车又只认叶子。
@@ -118,108 +110,6 @@ func TestTreeKeyCapture(t *testing.T) {
 	}
 }
 
-// 用户报的“中间的弹窗不会关闭，还会变得无法交互”：Esc 被全局 capture 抢走了。
-// 它跑在焦点分发之前，而 focused() 当时写成「焦点不是 main 就算面板」——
-// 确认弹窗的按钮恰好不是 main，于是 Esc 关掉的是面板，弹窗连焦点被丢在屏上。
-func TestConfirmModalEsc(t *testing.T) {
-	config.Config.Background = "NONE"
-	app := tview.NewApplication()
-	main := tview.NewBox()
-	p := &panel{app: app, main: main, client: live.NewClient(""), onLogin: func() {}}
-	p.pages = tview.NewPages().
-		AddPage("main", main, true, true).
-		AddPage("control", p.build(), true, true)
-	app.SetInputCapture(p.onKey)
-	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
-
-	p.onKey(tcell.NewEventKey(tcell.KeyF4, 0, tcell.ModNone))
-	if !p.pages.HasPage("confirm") {
-		t.Fatal("F4 该弹出确认窗")
-	}
-
-	// 第一下 Esc：只关弹窗，焦点还给面板。
-	if got := p.onKey(esc); got != nil {
-		t.Error("确认窗开着时 Esc 该被吞掉（关弹窗）")
-	}
-	if p.pages.HasPage("confirm") {
-		t.Error("Esc 没关掉确认窗")
-	}
-	if app.GetFocus() != p.tree {
-		t.Errorf("关掉确认窗后焦点 = %T，want 分区树（否则面板是死的）", app.GetFocus())
-	}
-
-	// 第二下 Esc：面板还在，关掉它。
-	p.onKey(esc)
-	if app.GetFocus() != p.main {
-		t.Errorf("再按 Esc 该关掉面板，焦点 = %T", app.GetFocus())
-	}
-}
-
-// 信息页盖在面板之上，Esc 必须先关它、把焦点还给分区树。
-// 判断顺序写错就会先关掉整个面板，输入框跟着人一起消失。
-func TestEditPageEsc(t *testing.T) {
-	config.Config.Background = "NONE"
-	app := tview.NewApplication()
-	main := tview.NewBox()
-	p := &panel{app: app, main: main, client: live.NewClient(""), onLogin: func() {}}
-	p.pages = tview.NewPages().
-		AddPage("main", main, true, true).
-		AddPage("control", p.build(), true, true).
-		AddPage("edit", p.buildEdit(), true, false)
-	app.SetInputCapture(p.onKey)
-	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
-
-	p.onKey(tcell.NewEventKey(tcell.KeyF6, 0, tcell.ModNone))
-	if app.GetFocus() != p.editTitle {
-		t.Fatalf("F6 后焦点 = %T，want 标题输入框", app.GetFocus())
-	}
-
-	// 第一下 Esc：关信息页，控制面板还在。
-	if got := p.onKey(esc); got != nil {
-		t.Error("信息页开着时 Esc 该被吞掉（关它）")
-	}
-	if app.GetFocus() != p.tree {
-		t.Errorf("关掉信息页后焦点 = %T，want 分区树（否则整个面板被一起关了）", app.GetFocus())
-	}
-
-	// 第二下 Esc：面板还在，关掉它。
-	p.onKey(esc)
-	if app.GetFocus() != p.main {
-		t.Errorf("再按 Esc 该关掉面板，焦点 = %T", app.GetFocus())
-	}
-}
-
-// 信息栏是带边框的盒子，可用高度 = 高度 - 2。之前定成 5 行只装得下 3 行文字，
-// 「按键: F2 登录 …」那行被静默吃掉，界面上完全看不出 F2~F6 是干什么的。
-func TestInfoShowsKeyHints(t *testing.T) {
-	config.Config.Background = "NONE"
-	config.Config.RoomId = 23333333
-	config.Config.AreaName = ""
-
-	screen := tcell.NewSimulationScreen("UTF-8")
-	if err := screen.Init(); err != nil {
-		t.Fatal(err)
-	}
-	screen.SetSize(120, 30)
-
-	p := &panel{app: tview.NewApplication(), client: live.NewClient(""), onLogin: func() {}}
-	root := p.build()
-	p.setInfo()
-	root.SetRect(0, 0, 120, 30)
-	root.Draw(screen)
-	screen.Show()
-
-	found := false
-	for _, row := range strings.Split(screenText(screen, 120, 30), "\n") {
-		if strings.Contains(row, "Esc") && strings.Contains(row, "F5") {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("信息栏里看不到按键提示（F5 / Esc 一行没被画出来）")
-	}
-}
-
 // screenText 把整屏拉成一段文本。宽字符在模拟屏幕上占两格、第二格是空的，
 // 所以调用方只按 ASCII 关键字找。
 func screenText(screen tcell.Screen, width, height int) string {
@@ -235,37 +125,6 @@ func screenText(screen tcell.Screen, width, height int) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
-}
-
-// 标题和封面挤在同一页上，Tab 必须能把焦点挪到下一项 ——
-// 挪不动的话封面那一栏就永远够不着，等于白加。
-func TestEditPageTabSwitches(t *testing.T) {
-	config.Config.Background = "NONE"
-	app := tview.NewApplication()
-	p := &panel{app: app, main: tview.NewBox(), client: live.NewClient(""), onLogin: func() {}}
-	p.pages = tview.NewPages().
-		AddPage("main", p.main, true, true).
-		AddPage("control", p.build(), true, true).
-		AddPage("edit", p.buildEdit(), true, true)
-	app.SetFocus(p.editTitle)
-
-	// InputField 只在 Enter/Tab/Backtab 上调 done，所以这里直接喂按键。
-	tab := tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
-	backtab := tcell.NewEventKey(tcell.KeyBacktab, 0, tcell.ModNone)
-	noop := func(tview.Primitive) {}
-
-	p.editTitle.InputHandler()(tab, noop)
-	if app.GetFocus() != p.editCover {
-		t.Fatalf("标题上按 Tab 后焦点 = %T，want 封面输入框", app.GetFocus())
-	}
-	p.editCover.InputHandler()(tab, noop)
-	if app.GetFocus() != p.editTitle {
-		t.Errorf("封面上按 Tab 后焦点 = %T，want 标题输入框", app.GetFocus())
-	}
-	p.editTitle.InputHandler()(backtab, noop)
-	if app.GetFocus() != p.editCover {
-		t.Errorf("标题上按 Shift+Tab 后焦点 = %T，want 封面输入框", app.GetFocus())
-	}
 }
 
 // TUI 里让人手敲一长串绝对路径不现实，~ 得自己展开 —— os.Open 不认它。
@@ -288,10 +147,21 @@ func TestExpandHome(t *testing.T) {
 	}
 }
 
-// 面板收起时（已登录就是这个状态）按 Esc 没有任何东西可关。
-// 以前是彻底没反应，看着像按键坏了 —— 得浮一句告诉用户退出靠 Ctrl+C。
-func TestEscAtBottomNotifies(t *testing.T) {
+func testAreas() []live.ParentArea {
+	return []live.ParentArea{
+		{Name: "网游", List: []live.SubArea{{ID: 1, Name: "英雄联盟"}, {ID: 2, Name: "DOTA2"}}},
+		{Name: "手游", List: []live.SubArea{{ID: 3, Name: "王者荣耀"}}},
+	}
+}
+
+// newTestPanel 拼一个跟 Wrap 差不多的面板：测试里不跑 app.Run，只喂按键。
+func newTestPanel(t *testing.T) (*panel, *tview.Application, *tview.Box) {
+	t.Helper()
 	config.Config.Background = "NONE"
+	config.Config.FrameColor = "#bbbbbb"
+	config.Config.InfoColor = "#ffffff"
+	config.Config.RankColor = "#bbbbbb"
+
 	app := tview.NewApplication()
 	main := tview.NewBox()
 	p := &panel{app: app, main: main, client: live.NewClient(""), onLogin: func() {}}
@@ -301,70 +171,187 @@ func TestEscAtBottomNotifies(t *testing.T) {
 		AddPage("control", p.build(), true, false).
 		AddPage("toast", p.toast, true, false)
 	app.SetInputCapture(p.onKey)
+	p.setInfo()
+	p.panelOpen = true
+	p.syncTab()
+	return p, app, main
+}
 
-	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
-	if got := p.onKey(esc); got != esc {
-		t.Error("退到底的 Esc 该原样交给主题，别吞掉")
+func key(k tcell.Key) *tcell.EventKey { return tcell.NewEventKey(k, 0, tcell.ModNone) }
+
+// Tab 换功能栏，Shift+Tab 是第一页和第二页来回切 —— 两个键管的事不一样，别串了。
+func TestTabAndBacktab(t *testing.T) {
+	p, app, main := newTestPanel(t)
+	tab, backtab := key(tcell.KeyTab), key(tcell.KeyBacktab)
+
+	// 弹幕页上 Tab 是输入框的键，不能抢；Shift+Tab 才是翻开第二页。
+	p.panelOpen = false
+	p.app.SetFocus(main)
+	if got := p.onKey(tab); got != tab {
+		t.Error("弹幕页上的 Tab 该原样交给主题")
+	}
+	if p.panelOpen {
+		t.Fatal("弹幕页上按 Tab 不该翻开配置页")
+	}
+	p.onKey(backtab)
+	if !p.panelOpen || p.tab != tabAccount {
+		t.Fatalf("Shift+Tab 该翻开配置页并停在账号栏，open=%v tab=%d", p.panelOpen, p.tab)
 	}
 
-	screen := tcell.NewSimulationScreen("UTF-8")
-	if err := screen.Init(); err != nil {
-		t.Fatal(err)
+	// 配置页里 Tab 一栏一栏往下走，走完绕回账号。
+	for i := 1; i < tabCount; i++ {
+		p.onKey(tab)
+		if p.tab != i {
+			t.Fatalf("第 %d 次 Tab 停在 %d 栏", i, p.tab)
+		}
 	}
-	screen.SetSize(100, 30)
-	p.pages.SetRect(0, 0, 100, 30)
-	p.pages.Draw(screen)
-	screen.Show()
+	p.onKey(tab)
+	if p.tab != tabAccount {
+		t.Errorf("绕一圈没回到账号栏，停在 %d", p.tab)
+	}
 
-	if !strings.Contains(screenText(screen, 100, 30), "Ctrl+C") {
-		t.Error("Esc 退到底时屏幕上没出现退出提示")
+	// 再按 Shift+Tab 收回弹幕页，焦点得还给主题。
+	p.onKey(backtab)
+	if p.panelOpen {
+		t.Error("Shift+Tab 没收起配置页")
 	}
-
-	// 提示浮着的时候再按一下 Esc，该立刻收掉它，而不是干等那两秒。
-	if got := p.onKey(esc); got != nil {
-		t.Error("提示开着时 Esc 该被吞掉（收掉提示）")
-	}
-	if p.toastShown {
-		t.Error("第二下 Esc 没把提示收掉")
+	if app.GetFocus() != main {
+		t.Errorf("收起后焦点 = %T，want 弹幕页", app.GetFocus())
 	}
 }
 
-// 右栏（扫码）只在有内容时才该占地方：空着还写死 46 列，分区树就被白白挤窄。
-// 宽字符在模拟屏幕上占两格、第二格是空的，所以边框标题取出来是「扫 码」。
-func TestSideBoxFollowsContent(t *testing.T) {
+// 换栏时左栏高亮、右栏页面、顶部提示要一起动，不然三者会对不上。
+func TestSyncTabKeepsThreePartsInSync(t *testing.T) {
+	p, _, _ := newTestPanel(t)
+
+	wantKeys := []string{"重新扫码", "确认该分区", "再回车 提交", "F5 下播"}
+	for tab := 0; tab < tabCount; tab++ {
+		p.openTab(tab)
+		if !strings.Contains(p.keybar.GetText(true), wantKeys[tab]) {
+			t.Errorf("第 %d 栏的提示里没有 %q", tab, wantKeys[tab])
+		}
+		if !strings.Contains(p.keybar.GetText(true), "Shift+Tab") {
+			t.Errorf("第 %d 栏的提示里缺「Shift+Tab 回弹幕页」", tab)
+		}
+		if !strings.Contains(p.sidebar.GetText(true), "▸ "+tabNames[tab]) {
+			t.Errorf("左栏没高亮 %q", tabNames[tab])
+		}
+		if !strings.Contains(p.contentBox.GetTitle(), tabNames[tab]) {
+			t.Errorf("右栏标题 = %q，want %q", p.contentBox.GetTitle(), tabNames[tab])
+		}
+	}
+}
+
+// 「上下选、回车编辑、Esc 取消」是直播间信息那栏的核心，三样都得对。
+func TestInfoFieldEditing(t *testing.T) {
+	p, app, _ := newTestPanel(t)
+	p.openTab(tabInfo)
+
+	enter, esc := key(tcell.KeyEnter), key(tcell.KeyEscape)
+	if p.fieldIdx != 0 {
+		t.Fatalf("默认该停在「标题」那行，实际 %d", p.fieldIdx)
+	}
+	p.onKey(key(tcell.KeyDown))
+	if p.fieldIdx != 1 {
+		t.Errorf("按下键后选中的是第 %d 行，want 封面", p.fieldIdx)
+	}
+	p.onKey(key(tcell.KeyUp))
+	if p.fieldIdx != 0 {
+		t.Errorf("按上键后选中的是第 %d 行，want 标题", p.fieldIdx)
+	}
+
+	// 回车进编辑：焦点要真的落到输入框上，不然打字打不进去。
+	p.editTitle.SetText("原来的标题")
+	p.onKey(enter)
+	if !p.editing || app.GetFocus() != p.editTitle {
+		t.Fatalf("回车后 editing=%v focus=%T，want 编辑中的标题输入框", p.editing, app.GetFocus())
+	}
+
+	// Esc 取消：改了一半的字要还原，焦点还给内容区。
+	p.editTitle.SetText("改了一半")
+	p.onKey(esc)
+	if p.editing {
+		t.Error("Esc 没退出编辑")
+	}
+	if got := p.editTitle.GetText(); got != "原来的标题" {
+		t.Errorf("Esc 之后输入框是 %q，want 还原成「原来的标题」", got)
+	}
+	// tview 的 SetFocus 会往下派给子控件，所以只断言「不在输入框上」——
+	// 光标还留在输入框，用户后面按的键就全打进去了。
+	if app.GetFocus() == p.editTitle {
+		t.Error("取消编辑后焦点还留在输入框上")
+	}
+}
+
+// Esc 一路退：提示 > 编辑 > 配置页，退到弹幕页就停住（退出是 Ctrl+C）。
+func TestEscLayers(t *testing.T) {
+	p, app, main := newTestPanel(t)
+	p.openTab(tabAccount)
+	esc := key(tcell.KeyEscape)
+
+	p.showToast("按 Ctrl+C 退出")
+	if got := p.onKey(esc); got != nil {
+		t.Error("提示开着时 Esc 该被吞掉（收提示）")
+	}
+	if p.toastShown {
+		t.Error("Esc 没收掉提示")
+	}
+
+	p.onKey(esc)
+	if p.panelOpen {
+		t.Error("Esc 没收起配置页")
+	}
+	if app.GetFocus() != main {
+		t.Errorf("焦点 = %T，want 弹幕页", app.GetFocus())
+	}
+}
+
+// 确认弹窗开着时 Esc 归它；关掉之后焦点要回到当前那一栏，
+// 而不是丢给弹幕页 —— 那样配置页还在屏上、键却全落到背面。
+func TestConfirmModalEsc(t *testing.T) {
+	p, app, _ := newTestPanel(t)
+	p.openTab(tabArea)
+
+	p.onKey(key(tcell.KeyF4))
+	if !p.pages.HasPage("confirm") {
+		t.Fatal("F4 该弹出确认窗")
+	}
+	if got := p.onKey(key(tcell.KeyEscape)); got != nil {
+		t.Error("确认窗开着时 Esc 该被吞掉（关弹窗）")
+	}
+	if p.pages.HasPage("confirm") {
+		t.Error("Esc 没关掉确认窗")
+	}
+	if app.GetFocus() != p.tree {
+		t.Errorf("关掉确认窗后焦点 = %T，want 分区树", app.GetFocus())
+	}
+}
+
+// 骨架画出来要是那个样子：顶部提示条、左栏四个功能名、右栏标题跟着当前栏走。
+func TestPanelLayout(t *testing.T) {
 	config.Config.Background = "NONE"
-	config.Config.RoomId = 23333333
-	config.Config.AreaName = ""
+	config.Config.FrameColor = "#bbbbbb"
+	p := &panel{app: tview.NewApplication(), client: live.NewClient(""), onLogin: func() {}}
+	root := p.build()
+	p.setInfo()
+	p.panelOpen = true
+	p.tab = tabStream
+	p.syncTab()
 
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
 		t.Fatal(err)
 	}
 	screen.SetSize(100, 30)
-
-	p := &panel{app: tview.NewApplication(), client: live.NewClient(""), onLogin: func() {}}
-	root := p.build()
-	p.setInfo()
 	root.SetRect(0, 0, 100, 30)
+	root.Draw(screen)
+	screen.Show()
 
-	draw := func() string {
-		screen.Clear()
-		root.Draw(screen)
-		screen.Show()
-		return screenText(screen, 100, 30)
-	}
-
-	if strings.Contains(draw(), "扫 码") {
-		t.Error("扫码框空着也占了一栏")
-	}
-
-	p.showSide("[white]扫我[-]", 30)
-	if !strings.Contains(draw(), "扫 码") {
-		t.Error("扫码框有内容了却没露出来")
-	}
-
-	p.hideSide()
-	if strings.Contains(draw(), "扫 码") {
-		t.Error("扫码框收起来之后还占着地方")
+	// 宽字符占两格、第二格是空的，把空格去掉再找。
+	flat := strings.ReplaceAll(screenText(screen, 100, 30), " ", "")
+	for _, want := range []string{"按键提示", "功能", "▸推流码", "账号", "分区", "直播间信息", "F5下播"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("屏幕上找不到 %q", want)
+		}
 	}
 }
