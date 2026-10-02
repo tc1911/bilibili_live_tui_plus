@@ -146,32 +146,14 @@ func Init() {
 	if show_time != -1 {
 		Config.ShowTime = show_time
 	}
-	if Config.TimeColor == "" {
-		Config.TimeColor = "#bbbbbb"
-	}
-	if Config.NameColor == "" {
-		Config.NameColor = "#bbbbbb"
-	}
-	if Config.ContentColor == "" {
-		Config.ContentColor = "#bbbbbb"
-	}
-	if Config.TimeColor == "" {
-		Config.TimeColor = "#bbbbbb"
-	}
-	if Config.NameColor == "" {
-		Config.NameColor = "#bbbbbb"
-	}
-	if Config.ContentColor == "" {
-		Config.ContentColor = "#bbbbbb"
-	}
-	if Config.InfoColor == "" {
-		Config.InfoColor = "#bbbbbb"
-	}
-	if Config.RankColor == "" {
-		Config.RankColor = "#bbbbbb"
-	}
-	if Config.FrameColor == "" {
-		Config.FrameColor = "#bbbbbb"
+	// 老配置文件里没这些字段，解出来是空串；空颜色塞进 tview 会画出看不见的字。
+	for _, color := range []*string{
+		&Config.TimeColor, &Config.NameColor, &Config.ContentColor,
+		&Config.InfoColor, &Config.RankColor, &Config.FrameColor,
+	} {
+		if *color == "" {
+			*color = "#bbbbbb"
+		}
 	}
 	if Config.Background == "" {
 		Config.Background = "NONE"
