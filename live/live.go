@@ -324,15 +324,3 @@ func (c *Client) StopLive(roomID int64) error {
 	}, false)
 	return err
 }
-
-// UpdateTitle 改直播间标题。
-func (c *Client) UpdateTitle(roomID int64, title string) error {
-	_, err := c.post(liveBase, "/room/v1/Room/update", map[string]string{
-		"room_id":    strconv.FormatInt(roomID, 10),
-		"title":      title,
-		"platform":   "pc_link",
-		"csrf":       c.csrf(),
-		"csrf_token": c.csrf(),
-	}, false)
-	return err
-}
