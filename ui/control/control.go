@@ -45,8 +45,9 @@ type panel struct {
 	hint    *tview.TextView
 	tree    *tview.TreeView
 
-	toast    *tview.Modal // 浮在最上层的临时提示
-	toastGen int          // 递增作废旧的隐藏定时器
+	toast      *tview.Modal // 浮在最上层的临时提示
+	toastGen   int          // 递增作废旧的隐藏定时器
+	toastShown bool
 
 	// 直播间信息页（标题 / 封面）的三件套
 	editTitle *tview.InputField
@@ -163,6 +164,10 @@ func (p *panel) onKey(ev *tcell.EventKey) *tcell.EventKey {
 			p.closeConfirm()
 			return nil
 		}
+		if p.toastShown {
+			p.hideToast()
+			return nil
+		}
 		if p.pages.HasPage("edit") && p.editFocused() {
 			p.closeEdit()
 			return nil
@@ -206,7 +211,7 @@ func (p *panel) focused() bool {
 // update 供后台 goroutine 改界面用；在事件循环里直接改会死锁。
 func (p *panel) update(fn func()) { p.app.QueueUpdateDraw(fn) }
 
-// showToast 在最上层浮一句提示，两秒后自己收。
+// showToast 在最上层浮一句提示，两秒后自己收；想立刻收掉就再按一下 Esc。
 // 不能用控制面板那行 hint：这会儿面板已经收起，用户看不到它。
 // 也不能常驻：它正盖着弹幕。
 func (p *panel) showToast(text string) {
@@ -214,14 +219,22 @@ func (p *panel) showToast(text string) {
 	gen := p.toastGen
 	p.toast.SetText(text)
 	p.pages.ShowPage("toast")
+	p.toastShown = true
 	// 连按 Esc 要重新计时，否则上一条的定时器会把新的一条提前收走。
 	time.AfterFunc(2*time.Second, func() {
 		p.update(func() {
 			if gen == p.toastGen {
-				p.pages.HidePage("toast")
+				p.hideToast()
 			}
 		})
 	})
+}
+
+func (p *panel) hideToast() {
+	// 顺手把代数加一：还在倒计的定时器看到对不上，就不会再来动这条。
+	p.toastGen++
+	p.toastShown = false
+	p.pages.HidePage("toast")
 }
 
 func (p *panel) setInfo() {

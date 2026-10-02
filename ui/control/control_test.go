@@ -319,4 +319,12 @@ func TestEscAtBottomNotifies(t *testing.T) {
 	if !strings.Contains(screenText(screen, 100, 30), "Ctrl+C") {
 		t.Error("Esc 退到底时屏幕上没出现退出提示")
 	}
+
+	// 提示浮着的时候再按一下 Esc，该立刻收掉它，而不是干等那两秒。
+	if got := p.onKey(esc); got != nil {
+		t.Error("提示开着时 Esc 该被吞掉（收掉提示）")
+	}
+	if p.toastShown {
+		t.Error("第二下 Esc 没把提示收掉")
+	}
 }
