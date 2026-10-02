@@ -27,7 +27,9 @@ jobs:
         run: |
           set -eu
           mkdir -p dist/stage
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '-s -w' -o dist/stage/bili .
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+            -ldflags "-s -w -X github.com/tc1911/bilibili_live_tui_plus/version.Version=${GITHUB_REF_NAME#v}" \
+            -o dist/stage/bili .
           cp LICENSE README.md dist/stage/
           tar -C dist/stage -czf "dist/bili_${GITHUB_REF_NAME}_linux_amd64.tar.gz" bili LICENSE README.md
 

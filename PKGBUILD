@@ -25,7 +25,7 @@ build() {
 	export CGO_CPPFLAGS="${CPPFLAGS}"
 	export CGO_CXXFLAGS="${CXXFLAGS}"
 	export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
-	go build -o bili .
+	go build -ldflags "-X github.com/tc1911/bilibili_live_tui_plus/version.Version=$pkgver" -o bili .
 }
 
 check() {
