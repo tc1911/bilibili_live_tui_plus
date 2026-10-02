@@ -24,6 +24,7 @@ import (
 
 	"github.com/tc1911/bilibili_live_tui_plus/config"
 	"github.com/tc1911/bilibili_live_tui_plus/live"
+	"github.com/tc1911/bilibili_live_tui_plus/ui/cover"
 )
 
 // 功能栏。顺序就是左栏从上到下的顺序，tabNames / tabHints 都按它排。
@@ -77,6 +78,7 @@ type panel struct {
 	streams     *tview.TextView // 推流码栏
 	editTitle   *tview.InputField
 	editCover   *tview.InputField
+	coverView   *cover.View // 「直播间信息」栏下半格：当前封面画出来
 
 	toast      *tview.Modal // 浮在最上层的临时提示
 	toastGen   int          // 递增作废旧的隐藏定时器

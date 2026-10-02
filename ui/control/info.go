@@ -10,6 +10,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/tc1911/bilibili_live_tui_plus/config"
+	"github.com/tc1911/bilibili_live_tui_plus/ui/cover"
 )
 
 // buildInfoPane 拼「直播间信息」那一栏：两行字段，上下选、回车编辑。
@@ -42,6 +43,18 @@ func (p *panel) buildInfoPane() *tview.Flex {
 	})
 	p.markFields()
 
+	// 封面图跟着终端大小现采样，所以直接给它剩下的高度，能画多大画多大。
+	p.coverView = cover.New()
+	p.coverView.SetHint("封面加载中…")
+	p.coverView.SetBackgroundColor(bg)
+	coverBox := tview.NewFlex().AddItem(p.coverView, 0, 1, false)
+	coverBox.SetBorder(true)
+	coverBox.SetTitle(" 当前封面 ")
+	coverBox.SetTitleAlign(tview.AlignLeft)
+	coverBox.SetBorderColor(frameColor())
+	coverBox.SetTitleColor(frameColor())
+	coverBox.SetBackgroundColor(bg)
+
 	tip := tview.NewTextView().SetDynamicColors(true).SetWrap(false)
 	tip.SetText("[gray]标题上限 40 字；封面填本地图片路径或 .hdslb.com 链接，留空表示不改[-]")
 	tip.SetBackgroundColor(bg)
@@ -50,7 +63,8 @@ func (p *panel) buildInfoPane() *tview.Flex {
 		AddItem(p.editTitle, 1, 0, false).
 		AddItem(p.editCover, 1, 0, false).
 		AddItem(nil, 1, 0, false).
-		AddItem(tip, 1, 0, false)
+		AddItem(tip, 1, 0, false).
+		AddItem(coverBox, 0, 1, false)
 }
 
 // markFields 用 ▸ 标出选中的那一行 —— 平时没有光标，得有个东西告诉用户选的是谁。
@@ -121,6 +135,8 @@ func (p *panel) loadTitle(roomID int64) {
 		if p.editTitle.GetText() == "" {
 			p.editTitle.SetText(room.Title)
 		}
+		// 封面只在地址变了的时候真去抓，Load 自己记得上一张是什么。
+		p.coverView.Load(room.Cover, func() { p.app.Draw() })
 		p.setHint("↑↓ 选一项，回车编辑，再回车提交；Esc 取消")
 	})
 }
@@ -165,6 +181,8 @@ func (p *panel) submitCover(src string) {
 		return
 	}
 	p.setStatus("封面已提交，生效要等几秒")
+	// 把新的那张拉回来：Load 看到地址变了才会重新抓。
+	go p.loadTitle(config.Config.RoomId)
 }
 
 // uploadIfLocal 填的已经是链接就直接用，否则当本地路径传图床 —— 封面只认

@@ -42,6 +42,8 @@ type Room struct {
 	ParentAreaID   ID     `json:"parent_area_id"`
 	ParentAreaName string `json:"parent_area_name"`
 	LiveStatus     int    `json:"live_status"`
+	// 主播设的那张房间封面。接口字段叫 user_cover，老文档里的 cover 现在不返了。
+	Cover string `json:"user_cover"`
 }
 
 func (r *Room) Area() string {
