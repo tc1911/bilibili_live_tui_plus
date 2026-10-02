@@ -1,4 +1,4 @@
-// Package theme5 是新版主界面，布局按效果图来：
+// 主界面，布局按效果图来：
 //
 //	┌──────────────────────────────────────────────┐
 //	│ 艺术字                            版本: vX.XX │
@@ -13,11 +13,9 @@
 //
 // 左边一栏固定占三分之一（Grid 的列写成 -1 / -2），底下那条横线是通的：
 // 左下推流状态和右下输入框同属最后一行。
-package theme5
+package ui
 
 import (
-	"fmt"
-	"os"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
@@ -26,7 +24,6 @@ import (
 	"github.com/tc1911/bilibili_live_tui_plus/config"
 	"github.com/tc1911/bilibili_live_tui_plus/getter"
 	"github.com/tc1911/bilibili_live_tui_plus/sender"
-	"github.com/tc1911/bilibili_live_tui_plus/ui/control"
 	"github.com/tc1911/bilibili_live_tui_plus/ui/cover"
 	"github.com/tc1911/bilibili_live_tui_plus/version"
 )
@@ -175,22 +172,4 @@ func draw(busChan chan getter.DanmuMsg, roomInfoChan chan getter.RoomInfo) *widg
 
 	w.root = grid
 	return w
-}
-
-func Run(busChan chan getter.DanmuMsg, roomInfoChan chan getter.RoomInfo, onLogin func()) {
-	if config.Config.Background != "NONE" {
-		bg = tcell.GetColor(config.Config.Background)
-	}
-
-	app := tview.NewApplication()
-	w := draw(busChan, roomInfoChan)
-
-	go danmuHandler(app, w.messages, busChan)
-	go roomInfoHandler(app, w, roomInfoChan)
-
-	root := control.Wrap(app, w.root, onLogin)
-	if err := app.SetRoot(root, true).EnableMouse(false).Run(); err != nil {
-		// 不 panic：TUI 起不来时给一句能看懂的话，堆栈留给日志。
-		fmt.Fprintln(os.Stderr, "TUI 启动失败: "+err.Error())
-	}
 }

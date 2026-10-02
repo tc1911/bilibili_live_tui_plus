@@ -17,7 +17,7 @@
 ```bash
 go build -o bili .          # 唯一的构建产出，别改名字，PKGBUILD 和 CI 都认它
 go run .                    # 首次会生成 ~/.config/bili/config.toml 并提示按 F2
-go run . -r 9527 -t 3       # 命令行参数优先级高于配置文件
+go run . -r 9527            # 命令行参数优先级高于配置文件
 go test ./...               # 全部测试，纯离线，不碰网络
 go vet ./...
 ```
@@ -34,9 +34,9 @@ getter/          弹幕长连接（websocket + 二进制协议），断线自动
   tools.go       zlib 解压、拆包、发包
 live/            B 站 API 客户端：扫码登录、分区表、开播取推流码、下播
 sender/          发弹幕（走 biligo）
-ui/ui.go         按 config.Config.Theme 分发到 theme1~4
-ui/themeN/       四套老主题，各自 ui.go（画）+ handler.go（收 channel）
-ui/theme5/       新版主界面（-t 5）：标题栏 + 封面预览 + 观众列表 + 推流状态
+ui/ui.go         Run 入口：建 Application、起 handler、套上配置页
+ui/              主界面：screen.go（画）+ handler.go（收 channel）+ ui.go（Run 入口）
+                 2026-10-03 拆掉了 1~5 号主题，只剩重做的这一套
 ui/cover/        把封面画进终端：抓图 -> 区域平均缩图 -> 半格字符上色（跟二维码一个套路）
 version/         版本号，打包时用 -ldflags -X 注入，本地 go build 是 dev
 ui/control/      配置页（Shift+Tab 在两页间切）：顶部提示条 / 左栏功能 / 右栏内容，
@@ -50,9 +50,9 @@ ui/control/      配置页（Shift+Tab 在两页间切）：顶部提示条 / �
 数据流是单向的，别绕开：
 
 ```text
-getter.supervisor --> busChan (DanmuMsg) --> themeN.handler.danmuHandler --> tview
-                  --> roomInfoChan (RoomInfo) --> themeN.handler.roomInfoHandler
-发送：themeN 输入框 --> sender.SendMsg --> busChan（自己发的也回流显示）
+getter.supervisor --> busChan (DanmuMsg) --> ui.handler.danmuHandler --> tview
+                  --> roomInfoChan (RoomInfo) --> ui.handler.roomInfoHandler
+发送：输入框 --> sender.SendMsg --> busChan（自己发的也回流显示）
 ```
 
 ## 硬约束（改代码前必读）
@@ -176,6 +176,6 @@ CI 干的事：`go test ./...` → `CGO_ENABLED=0` 交叉编译 linux/amd64 → 
 ## 别做的事
 
 - 不要把弹幕 / 开播接口换成没验证过的第三方封装
-- 不要为了「更干净」把 `theme1~4` 合并，四套主题是上游的兼容面
+- 不要再加主题开关：2026-10-03 已经砍掉 1~5 号主题，只留这一套界面
 - 不要在 `getter` 里塞请求节流以外的业务逻辑，它只负责把弹幕搬进 channel
 - 不要在没有真机 / 真账号验证的情况下改开播流程，`F4` 会**立刻让直播间对外可见并推送给粉丝**

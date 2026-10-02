@@ -1,4 +1,4 @@
-package theme5
+package ui
 
 import (
 	"strings"

@@ -16,7 +16,6 @@ type ConfigType struct {
 	RoomId       int64  // 直播间id
 	AreaV2       int64  // 记忆的开播分区id (area_v2)
 	AreaName     string // 记忆的开播分区名，仅用于显示
-	Theme        int64  // 主题
 	SingleLine   int64  // 是否开启单行
 	ShowTime     int64  // 是否显示时间
 	TimeColor    string // 时间颜色
@@ -77,7 +76,6 @@ func defaultCfgFile() (configFile string, err error) {
 		config := ConfigType{
 			Cookie:       "从你BILIBILI的请求里抓一个Cookie",
 			RoomId:       23333333,
-			Theme:        1,
 			SingleLine:   1,
 			ShowTime:     1,
 			TimeColor:    "#FFFFFF",
@@ -108,12 +106,10 @@ func Init() {
 	var err error
 	configFile := ""
 	roomId := int64(-1)
-	theme := int64(-1)
 	single_line := int64(-1)
 	show_time := int64(-1)
 	flag.StringVar(&configFile, "c", "", "usage for config")
 	flag.Int64Var(&roomId, "r", -1, "usage for room id")
-	flag.Int64Var(&theme, "t", -1, "usage for theme")
 	flag.Int64Var(&single_line, "l", -1, "usage for single_line")
 	flag.Int64Var(&show_time, "s", -1, "usage for show_time")
 	flag.Parse()
@@ -136,9 +132,6 @@ func Init() {
 
 	if roomId != -1 {
 		Config.RoomId = roomId
-	}
-	if theme != -1 {
-		Config.Theme = theme
 	}
 	if single_line != -1 {
 		Config.SingleLine = single_line
