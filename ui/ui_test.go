@@ -32,7 +32,7 @@ func TestLayoutBoxes(t *testing.T) {
 
 	// 宽字符占两格、第二格为空，所以把空格去掉再找。
 	flat := strings.ReplaceAll(screenText(screen, 100, 30), " ", "")
-	for _, want := range []string{"直播间信息", "弹幕们", "观众列表", "obs推流状态", "弹幕输入框", "版本:", "██▄███"} {
+	for _, want := range []string{"直播间信息", "弹幕们", "观众列表", "obs推流状态", "弹幕输入框", "版本:", "██████╗", "╚══════╝"} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("屏幕上找不到 %q", want)
 		}
@@ -54,10 +54,11 @@ func TestColumnSplit(t *testing.T) {
 	w.root.Draw(screen)
 	screen.Show()
 
-	// 弹幕那一行（第 8 行）上，第 32 列应该是分隔两个框的竖线。
-	line := strings.Split(screenText(screen, 96, 30), "\n")[8]
+	// 顶栏占 bannerRows+2 行，往下再数一行就是主体区的内部，第 32 列该是分隔两栏的竖线。
+	row := bannerRows + 3
+	line := strings.Split(screenText(screen, 96, 30), "\n")[row]
 	if got := []rune(line)[32]; got != '│' && got != '║' {
-		t.Errorf("第 8 行第 32 列 = %q，want 竖线（左栏应占三分之一）", got)
+		t.Errorf("第 %d 行第 32 列 = %q，want 竖线（左栏应占三分之一）", row, got)
 	}
 }
 

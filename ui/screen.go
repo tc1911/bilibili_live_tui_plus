@@ -27,14 +27,19 @@ import (
 	"github.com/tc1911/bilibili_live_tui_plus/version"
 )
 
-// banner 是软件名的 TUI 艺术字，半格字符拼的。改的话注意每行都是 11 格宽。
+// banner 是软件名的 TUI 艺术字（figlet 的 ANSI Shadow 那一款，手抄的）。
+// 改的话注意每行都是 22 格宽、6 行，顶部那条的高度 SetRows 要跟着改。
 var banner = []string{
-	"██▄ █ █  █",
-	"█ █ █ █  █",
-	"██▀ █ █  █",
-	"█ █ █ █  █",
-	"██▀ █ ███ █",
+	"██████╗ ██╗██╗     ██╗",
+	"██╔══██╗██║██║     ██║",
+	"██████╔╝██║██║     ██║",
+	"██╔══██╗██║██║     ██║",
+	"██████╔╝██║███████╗██║",
+	"╚═════╝ ╚═╝╚══════╝╚═╝",
 }
+
+// bannerRows 是艺术字占的行数，顶部那条比它多两行（上下边框）。
+const bannerRows = 6
 
 var (
 	bg               = tcell.ColorDefault
@@ -153,7 +158,7 @@ func draw(busChan chan getter.DanmuMsg, roomInfoChan chan getter.RoomInfo) *widg
 		AddItem(box("观众列表", w.viewers), 0, 1, false)
 
 	grid := tview.NewGrid().
-		SetRows(7, 0, 3).
+		SetRows(bannerRows+2, 0, 3).
 		SetColumns(-1, -2).
 		AddItem(box("", header), 0, 0, 1, 2, 0, 0, false).
 		AddItem(leftColumn, 1, 0, 1, 1, 0, 0, false).
