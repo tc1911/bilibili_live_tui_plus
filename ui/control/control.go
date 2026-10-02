@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"github.com/tc1911/bilibili_live_tui_plus/config"
 	"github.com/tc1911/bilibili_live_tui_plus/live"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +46,7 @@ type panel struct {
 	tree    *tview.TreeView
 
 	titleInput *tview.InputField // 改标题那一页的输入框
+	coverInput *tview.InputField // 改封面那一页的输入框
 
 	mu      sync.Mutex // 串行化接口调用
 	qrGen   int        // 递增即作废旧的扫码轮询
@@ -65,7 +68,8 @@ func Wrap(app *tview.Application, root tview.Primitive, onLogin func()) *tview.P
 		AddPage("main", root, true, true).
 		AddPage("control", p.build(), true, false).
 		AddPage("streams", p.streams, true, false).
-		AddPage("title", p.buildTitle(), true, false)
+		AddPage("title", p.buildTitle(), true, false).
+		AddPage("cover", p.buildCover(), true, false)
 	p.pages.SetBackgroundColor(bgColor())
 	app.SetInputCapture(p.onKey)
 
@@ -146,6 +150,8 @@ func (p *panel) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		go p.stopLive()
 	case tcell.KeyF6:
 		p.openTitle()
+	case tcell.KeyF7:
+		p.openCover()
 	case tcell.KeyEscape:
 		// 确认弹窗开着时 Esc 归它。必须先判：全局 capture 跑在焦点分发之前，
 		// 底下那两个分支会把 Esc 当成「关面板」，弹窗就被连人带焦点丢在屏上。
@@ -155,6 +161,10 @@ func (p *panel) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		}
 		if p.pages.HasPage("title") && p.app.GetFocus() == p.titleInput {
 			p.closeTitle()
+			return nil
+		}
+		if p.pages.HasPage("cover") && p.app.GetFocus() == p.coverInput {
+			p.closeCover()
 			return nil
 		}
 		if p.pages.HasPage("streams") && p.app.GetFocus() == p.streams {
@@ -199,7 +209,7 @@ func (p *panel) setInfo() {
 		area = "未选择（F3）"
 	}
 	p.info.SetText(fmt.Sprintf(
-		"[white]账号:[-] %s\n[white]直播间:[-] %d\n[white]分区:[-] %s\n[white]按键:[-] F2 登录  F3 分区  F4 开播  F5 下播  F6 改标题  Esc 关闭",
+		"[white]账号:[-] %s\n[white]直播间:[-] %d\n[white]分区:[-] %s\n[white]按键:[-] F2 登录  F3 分区  F4 开播  F5 下播  F6 改标题  F7 改封面  Esc 关闭",
 		p.account, config.Config.RoomId, area))
 }
 
@@ -488,11 +498,13 @@ func (p *panel) openTitle() {
 	p.pages.ShowPage("title")
 	p.app.SetFocus(p.titleInput)
 	p.setHint("正在读取当前标题…")
-	go p.loadTitle()
+	// 房间号在事件循环里读好再交出去：后台 goroutine 摸全局 config 会跟
+	// 登录/选分区时写 config 的代码撞车（-race 能抓出来）。
+	roomID := config.Config.RoomId
+	go p.loadTitle(roomID)
 }
 
-func (p *panel) loadTitle() {
-	roomID := config.Config.RoomId
+func (p *panel) loadTitle(roomID int64) {
 	p.mu.Lock()
 	room, err := p.client.Room(roomID)
 	p.mu.Unlock()
@@ -535,6 +547,87 @@ func (p *panel) applyTitle(title string) {
 // 焦点留在输入框上，面板看着还在、实际按什么都没反应。
 func (p *panel) closeTitle() {
 	p.pages.HidePage("title")
+	p.pages.ShowPage("control")
+	p.app.SetFocus(p.tree)
+}
+
+// ---------------------------------------------------------------- 改封面
+
+// buildCover 是「改封面」那一页。输入框既收本地路径也收链接：
+// 传图那步会失败的时候（图太大、格式不对），用户还能把已经传好的图贴进来。
+func (p *panel) buildCover() *tview.Flex {
+	page, field := p.buildInputPage(
+		" 改直播间封面 ",
+		" 图片: ",
+		"[yellow]填本地图片路径，或已经传好的 .hdslb.com 链接；回车提交，Esc 取消[-]",
+		nil, // 路径不做字符限制
+		func(src string) { go p.applyCover(src) },
+	)
+	p.coverInput = field
+	return page
+}
+
+func (p *panel) openCover() {
+	p.show()
+	p.pages.ShowPage("cover")
+	p.app.SetFocus(p.coverInput)
+	p.setHint("填本地图片路径，回车后先传到 B 站图床（几 MB 的图要等一会儿）")
+}
+
+func (p *panel) applyCover(src string) {
+	if src == "" {
+		p.update(func() { p.setHint("先填图片路径，或已经传好的 .hdslb.com 链接") })
+		return
+	}
+
+	p.update(func() { p.setHint("正在处理 " + filepath.Base(src) + " …") })
+	cover, err := p.uploadIfLocal(src)
+	if err != nil {
+		p.update(func() { p.setHint("上传失败: " + err.Error()) })
+		return
+	}
+
+	p.mu.Lock()
+	err = p.client.UpdateCover(cover)
+	p.mu.Unlock()
+
+	p.update(func() {
+		if err != nil {
+			p.setHint("改封面失败: " + err.Error())
+			return
+		}
+		p.closeCover()
+		p.setHint("封面已提交，生效要等几秒")
+	})
+}
+
+// uploadIfLocal 填的已经是链接就直接用，否则当本地路径传图床 —— 封面只认
+// .hdslb.com 下的图，别处来的地址服务端一律 100402 拒绝，所以这一步躲不掉。
+func (p *panel) uploadIfLocal(src string) (string, error) {
+	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
+		return src, nil
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.client.UploadImage(expandHome(src))
+}
+
+// expandHome 把开头的 ~ 换成家目录。让用户在 TUI 里手敲一长串绝对路径不现实，
+// 但 os.Open 不认 ~，这活儿得自己干。
+func expandHome(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, strings.TrimPrefix(path, "~"))
+}
+
+func (p *panel) closeCover() {
+	p.pages.HidePage("cover")
 	p.pages.ShowPage("control")
 	p.app.SetFocus(p.tree)
 }

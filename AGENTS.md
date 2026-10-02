@@ -36,7 +36,7 @@ live/            B 站 API 客户端：扫码登录、分区表、开播取推�
 sender/          发弹幕（走 biligo）
 ui/ui.go         按 config.Config.Theme 分发到 theme1~4
 ui/themeN/       四套主题，各自 ui.go（画）+ handler.go（收 channel）
-ui/control/      叠在主题之上的控制面板：F2 登录 / F3 分区 / F4 开播 / F5 下播 / F6 改标题 / Esc
+ui/control/      叠在主题之上的控制面板：F2 登录 / F3 分区 / F4 开播 / F5 下播 / F6 改标题 / F7 改封面 / Esc
 ```
 
 数据流是单向的，别绕开：
@@ -82,14 +82,24 @@ tview 的上下键只停在可选节点，父分区不可选就会被整段跳�
 左右键在 tview 里只移动选中项，展开 / 收起得靠 `treeKeyCapture` 自己拦，
 并且**在已经展开 / 收起之后要把事件交回去**，否则人回不到父分区。
 
-### 6. 配置写入
+### 6. 封面必须先落到 B 站图床
+
+`UpdatePreLiveInfo` 的 `cover` 只认 `.hdslb.com` 下的图片地址，别处来的链接一律回 `100402`，
+所以「改封面」是两步：`UploadImage` 传图床拿地址 → `UpdateCover` 更新。
+
+- 传图走 `POST api.bilibili.com/x/upload/web/image`，multipart，字段是 `file` + `bucket` + `csrf`，
+  返回 `data.image_url` 或 `data.location`（`location` 是 http 的，要升成 https）
+- `bucket` 取 `openplatform`；换别的桶可能被拒
+- `UpdatePreLiveInfo` 虽然挂在 `app-blink` 下，网页端只带 csrf 就能过，**不要**给它加 app 签名
+
+### 7. 配置写入
 
 - 路径固定在 `~/.config/bili/config.toml`（用 `os/user` 取 home，不是 `$HOME`）
 - `config.Save()` 写回 `config.ConfigFile`，登录 / 选分区后调用
 - `config.toml` 在 `.gitignore` 里，**永远不要**把它或里面的 Cookie 提交上去
 - Cookie 只在本地文件里流转，不要打印到日志
 
-### 7. locale 会重执行一次
+### 8. locale 会重执行一次
 
 `main.go` 的 `fixCharset`：`LANG` 是中日韩泰印地语系时把自己 `LANG=C.UTF-8` 重新 exec 一遍，
 好让 tview 正确算宽字符宽度。改启动流程时别把这个丢了，也别在里面加副作用。
@@ -101,6 +111,8 @@ tview 的上下键只停在可选节点，父分区不可选就会被整段跳�
 - `getter/wbi_test.go`：黄金值钉住 WBI 算法。里面的 img/sub key 是 nav 公开下发的种子（每日轮换），不是凭据
 - `ui/control/control_test.go`：按真实按键事件测分区树导航与 Esc 层级，不查私有字段
 - `live/live_test.go`：钉住人脸认证页地址
+- `ui/control/control_test.go`：按键分层、分区树导航，外加 `TestInfoShowsKeyHints` ——
+  信息栏是 height 减 2 的盒子，改高度或加行都会把提示挤掉，那个测试会红
 
 改 B 站接口相关代码时顺手确认黄金值测试还是对的——它们存在的意义就是接口规则一变就报警。
 

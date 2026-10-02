@@ -1,6 +1,7 @@
 package control
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -225,5 +226,56 @@ func TestInfoShowsKeyHints(t *testing.T) {
 	}
 	if !found {
 		t.Error("信息栏里看不到按键提示（F5 / Esc 一行没被画出来）")
+	}
+}
+
+// 封面页跟标题页一样是独立一页，Esc 只能关它自己、把焦点还给分区树。
+func TestCoverPageEsc(t *testing.T) {
+	config.Config.Background = "NONE"
+	app := tview.NewApplication()
+	main := tview.NewBox()
+	p := &panel{app: app, main: main, client: live.NewClient(""), onLogin: func() {}}
+	p.pages = tview.NewPages().
+		AddPage("main", main, true, true).
+		AddPage("control", p.build(), true, true).
+		AddPage("cover", p.buildCover(), true, false)
+	app.SetInputCapture(p.onKey)
+	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
+
+	p.onKey(tcell.NewEventKey(tcell.KeyF7, 0, tcell.ModNone))
+	if app.GetFocus() != p.coverInput {
+		t.Fatalf("F7 后焦点 = %T，want 封面输入框", app.GetFocus())
+	}
+
+	if got := p.onKey(esc); got != nil {
+		t.Error("封面页开着时 Esc 该被吞掉（关它）")
+	}
+	if app.GetFocus() != p.tree {
+		t.Errorf("关掉封面页后焦点 = %T，want 分区树", app.GetFocus())
+	}
+
+	p.onKey(esc)
+	if app.GetFocus() != p.main {
+		t.Errorf("再按 Esc 该关掉面板，焦点 = %T", app.GetFocus())
+	}
+}
+
+// TUI 里让人手敲一长串绝对路径不现实，~ 得自己展开 —— os.Open 不认它。
+func TestExpandHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("取不到家目录")
+	}
+	cases := []struct{ in, want string }{
+		{"~/图.png", home + "/图.png"},
+		{"~", home},
+		{"/tmp/a.png", "/tmp/a.png"},
+		{"a.png", "a.png"},
+		{"~other/a.png", "~other/a.png"}, // 别人的家目录不归我们管
+	}
+	for _, c := range cases {
+		if got := expandHome(c.in); got != c.want {
+			t.Errorf("expandHome(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

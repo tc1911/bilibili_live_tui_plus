@@ -4,13 +4,18 @@
 package live
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -67,6 +72,17 @@ func parseCookie(s string) map[string]string {
 // LoggedIn 只看两个必需字段，是否真的有效交给 Nav 判断。
 func (c *Client) LoggedIn() bool {
 	return c.cookies["SESSDATA"] != "" && c.cookies["bili_jct"] != ""
+}
+
+// cookieHeader 把手上所有 cookie 拼成一个请求头。
+// 给的是全集而不是 Cookie() 那几个字段：风控认 buvid 之类的旁路 cookie，
+// 只带 SESSDATA/bili_jct 容易被挡。
+func (c *Client) cookieHeader() string {
+	parts := make([]string, 0, len(c.cookies))
+	for k, v := range c.cookies {
+		parts = append(parts, k+"="+v)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // Cookie 拼回可写进 config.toml 的 Cookie 串。
@@ -127,12 +143,8 @@ func (c *Client) do(method, base, path string, params map[string]string, sign bo
 	if body != "" {
 		req.Header.Set("content-type", "application/x-www-form-urlencoded; charset=UTF-8")
 	}
-	if len(c.cookies) > 0 {
-		parts := make([]string, 0, len(c.cookies))
-		for k, v := range c.cookies {
-			parts = append(parts, k+"="+v)
-		}
-		req.Header.Set("cookie", strings.Join(parts, "; "))
+	if cookie := c.cookieHeader(); cookie != "" {
+		req.Header.Set("cookie", cookie)
 	}
 
 	resp, err := c.http.Do(req)
@@ -152,6 +164,12 @@ func (c *Client) do(method, base, path string, params map[string]string, sign bo
 	if err != nil {
 		return nil, err
 	}
+	return unwrap(path, resp.StatusCode, raw)
+}
+
+// unwrap 解开所有接口共用的 {code,message,data} 外壳，code 非 0 一律转成 *ApiError。
+// 传图走 multipart，用不上 do，但外壳是同一套，所以拎出来两边共用。
+func unwrap(path string, status int, raw []byte) (json.RawMessage, error) {
 	var payload struct {
 		Code    int             `json:"code"`
 		Message string          `json:"message"`
@@ -159,7 +177,7 @@ func (c *Client) do(method, base, path string, params map[string]string, sign bo
 		Data    json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, fmt.Errorf("接口 %s 返回非 JSON (HTTP %d): %s", path, resp.StatusCode, truncate(string(raw), 200))
+		return nil, fmt.Errorf("接口 %s 返回非 JSON (HTTP %d): %s", path, status, truncate(string(raw), 200))
 	}
 	if payload.Code != 0 {
 		msg := payload.Message
@@ -186,6 +204,96 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// UploadImage 把本地图片传到 B 站图床，返回 .hdslb.com 下的地址。
+// 改封面躲不开这一步：UpdatePreLiveInfo 的 cover 只认 .hdslb.com 的链接，
+// 别的地址一律回 100402（图片地址不合法）。表单字段对齐网页端上传组件。
+func (c *Client) UploadImage(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	// bucket 是分桶参数，缺了会报「图片位置不对」这类错；openplatform 是公开图床桶，
+	// 返回的同样是 i0.hdslb.com 的地址，能被封面接口接受。
+	if err := w.WriteField("bucket", "openplatform"); err != nil {
+		return "", err
+	}
+	if err := w.WriteField("csrf", c.csrf()); err != nil {
+		return "", err
+	}
+	part, err := w.CreateFormFile("file", filepath.Base(path))
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return "", err
+	}
+	if err := w.Close(); err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, mainBase+"/x/upload/web/image", &body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("content-type", w.FormDataContentType())
+	req.Header.Set("user-agent", userAgent)
+	req.Header.Set("accept", "*/*")
+	req.Header.Set("origin", mainBase)
+	if cookie := c.cookieHeader(); cookie != "" {
+		req.Header.Set("cookie", cookie)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("上传图片失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	data, err := unwrap("/x/upload/web/image", resp.StatusCode, raw)
+	if err != nil {
+		return "", err
+	}
+
+	var out struct {
+		ImageURL string `json:"image_url"`
+		Location string `json:"location"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return "", err
+	}
+	url := out.ImageURL
+	if url == "" {
+		// location 是 http 的，统一升成 https，免得被下游当不安全链接拒掉。
+		url = strings.Replace(out.Location, "http://", "https://", 1)
+	}
+	if url == "" {
+		return "", errors.New("图床没返回图片地址")
+	}
+	return url, nil
+}
+
+// UpdateCover 更新直播间封面。cover 必须是 .hdslb.com 下的地址，本地图先走 UploadImage。
+// 接口挂在 app-blink 下，但网页端只带 csrf 就能过，不用 app 签名。
+func (c *Client) UpdateCover(cover string) error {
+	_, err := c.post(liveBase, "/xlive/app-blink/v1/preLive/UpdatePreLiveInfo", map[string]string{
+		"platform":   "web",
+		"mobi_app":   "web",
+		"build":      "1",
+		"csrf":       c.csrf(),
+		"csrf_token": c.csrf(),
+		"cover":      cover,
+	}, false)
+	return err
 }
 
 // ID 兼容接口把 id 返回成字符串或数字两种写法。
