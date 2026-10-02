@@ -111,7 +111,7 @@ func (p *panel) build() *tview.Flex {
 	p.body = body
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.info, 5, 0, false).
+		AddItem(p.info, 6, 0, false).
 		AddItem(body, 0, 1, true).
 		AddItem(p.hint, 2, 0, false)
 	root.SetBackgroundColor(bg)

@@ -1,8 +1,10 @@
 package control
 
 import (
-	"github.com/tc1911/bilibili_live_tui_plus/config"
+	"strings"
 	"testing"
+
+	"github.com/tc1911/bilibili_live_tui_plus/config"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -183,5 +185,45 @@ func TestTitlePageEsc(t *testing.T) {
 	p.onKey(esc)
 	if app.GetFocus() != p.main {
 		t.Errorf("再按 Esc 该关掉面板，焦点 = %T", app.GetFocus())
+	}
+}
+
+// 信息栏是带边框的盒子，可用高度 = 高度 - 2。之前定成 5 行只装得下 3 行文字，
+// 「按键: F2 登录 …」那行被静默吃掉，界面上完全看不出 F2~F7 是干什么的。
+func TestInfoShowsKeyHints(t *testing.T) {
+	config.Config.Background = "NONE"
+	config.Config.RoomId = 23333333
+	config.Config.AreaName = ""
+
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(120, 30)
+
+	p := &panel{app: tview.NewApplication(), client: live.NewClient(""), onLogin: func() {}}
+	root := p.build()
+	p.setInfo()
+	root.SetRect(0, 0, 120, 30)
+	root.Draw(screen)
+	screen.Show()
+
+	// 宽字符在模拟屏幕上占两格、第二格是空的，所以按 ASCII 关键字找整行。
+	found := false
+	for y := 0; y < 12 && !found; y++ {
+		row := ""
+		for x := 0; x < 120; x++ {
+			m, _, _, _ := screen.GetContent(x, y)
+			if m == 0 {
+				m = ' '
+			}
+			row += string(m)
+		}
+		if strings.Contains(row, "Esc") && strings.Contains(row, "F5") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("信息栏里看不到按键提示（F5 / Esc 一行没被画出来）")
 	}
 }
