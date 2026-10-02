@@ -16,6 +16,10 @@ type ConfigType struct {
 	RoomId       int64  // 直播间id
 	AreaV2       int64  // 记忆的开播分区id (area_v2)
 	AreaName     string // 记忆的开播分区名，仅用于显示
+	OBSFill      bool   // 开播后自动把推流地址与密钥填进 OBS
+	OBSHost      string // OBS WebSocket 地址，空则 127.0.0.1
+	OBSPort      int64  // OBS WebSocket 端口，0 表示去读 OBS 自己的配置
+	OBSPassword  string // OBS WebSocket 密码，空表示去读 OBS 自己的配置
 	SingleLine   int64  // 是否开启单行
 	ShowTime     int64  // 是否显示时间
 	TimeColor    string // 时间颜色
@@ -76,6 +80,7 @@ func defaultCfgFile() (configFile string, err error) {
 		config := ConfigType{
 			Cookie:       "从你BILIBILI的请求里抓一个Cookie",
 			RoomId:       23333333,
+			OBSFill:      true,
 			SingleLine:   1,
 			ShowTime:     1,
 			TimeColor:    "#FFFFFF",

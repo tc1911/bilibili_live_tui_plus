@@ -7,6 +7,7 @@ import (
 
 	"github.com/tc1911/bilibili_live_tui_plus/config"
 	"github.com/tc1911/bilibili_live_tui_plus/live"
+	"github.com/tc1911/bilibili_live_tui_plus/obs"
 )
 
 // loadStreamStatus 进「推流码」栏时先看一眼开播状态，没开播就别摆个空框。
@@ -98,6 +99,7 @@ func (p *panel) startLive() {
 		}
 		text += "\n服务器\n" + s.Address + "\n密钥\n" + s.Key + "\n\n"
 	}
+	text += p.fillOBS(streams[0])
 	text += "[yellow]直播间已对外可见；下播按 F5，回弹幕页按 Shift+Tab[-]"
 
 	p.update(func() {
@@ -107,6 +109,23 @@ func (p *panel) startLive() {
 		p.syncTab()
 		p.setHint(fmt.Sprintf("已开播：%s（%s）", room.Title, room.Area()))
 	})
+}
+
+// fillOBS 把这一组推流凭据填进 OBS 的「设置 → 推流」，返回一行给用户看的结果。
+// 没开联动、或者 OBS 那半边没准备好，都只是多一行字，不影响开播本身。
+func (p *panel) fillOBS(s live.Stream) string {
+	if !config.Config.OBSFill {
+		return ""
+	}
+
+	set, err := obs.Resolve(config.Config.OBSHost, int(config.Config.OBSPort), config.Config.OBSPassword)
+	if err != nil {
+		return "\n[red]没填进 OBS：[-]" + err.Error() + "\n"
+	}
+	if err := obs.SetStream(set, s.Address, s.Key); err != nil {
+		return "\n[red]没填进 OBS：[-]" + err.Error() + "\n"
+	}
+	return "\n[green]已填进 OBS 的「推流」设置[-]（服务器 + 密钥），去 OBS 里点「开始推流」就行\n"
 }
 
 func (p *panel) stopLive() {
