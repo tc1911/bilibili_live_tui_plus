@@ -51,6 +51,7 @@ func roomInfoHandler(app *tview.Application, w *widgets, roomInfoChan chan gette
 			config.Config.InfoColor, ri.Title,
 			ri.RoomId, ri.ParentAreaName, ri.AreaName, ri.Online, ri.Attention))
 
+		w.infoBox.SetTitle(infoTitle(ri))
 		w.viewers.SetTitle(fmt.Sprintf(" 观众列表 (%d) ", len(ri.OnlineRankUsers)))
 		w.viewers.SetText(rankUsers(ri.OnlineRankUsers))
 
@@ -71,6 +72,19 @@ func streamStatus(ri getter.RoomInfo) string {
 	default:
 		return "[gray]○ 未开播[-]"
 	}
+}
+
+// infoTitle 把「最后一次成功拉到的时间」写在框边上：数据新不新一眼能看出来。
+// 拉失败时明说摆的是旧数据，别让用户以为房间突然空了。
+func infoTitle(ri getter.RoomInfo) string {
+	if ri.UpdatedAt.IsZero() {
+		return " 直播间信息 "
+	}
+	stamp := ri.UpdatedAt.Format("15:04")
+	if ri.Failed {
+		return " 直播间信息 · " + stamp + " 的数据（这次没刷上） "
+	}
+	return " 直播间信息 · " + stamp + " 更新 "
 }
 
 func rankUsers(users []getter.OnlineRankUser) string {

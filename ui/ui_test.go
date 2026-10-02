@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -74,4 +75,24 @@ func screenText(screen tcell.Screen, width, height int) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// 房间信息框边上写的是「最后一次成功拉到的时间」。这次没刷上要说清楚摆的是旧数据，
+// 不然用户会以为房间突然空了。
+func TestInfoTitle(t *testing.T) {
+	at := time.Date(2026, 10, 3, 15, 4, 0, 0, time.Local)
+	cases := []struct {
+		name string
+		ri   getter.RoomInfo
+		want string
+	}{
+		{"还没拉到过", getter.RoomInfo{}, " 直播间信息 "},
+		{"正常", getter.RoomInfo{UpdatedAt: at}, " 直播间信息 · 15:04 更新 "},
+		{"这次没刷上", getter.RoomInfo{UpdatedAt: at, Failed: true}, " 直播间信息 · 15:04 的数据（这次没刷上） "},
+	}
+	for _, c := range cases {
+		if got := infoTitle(c.ri); got != c.want {
+			t.Errorf("%s: infoTitle = %q, want %q", c.name, got, c.want)
+		}
+	}
 }

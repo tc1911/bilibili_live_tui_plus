@@ -50,6 +50,7 @@ type widgets struct {
 	viewers  *tview.TextView
 	info     *tview.TextView
 	stream   *tview.TextView
+	infoBox  *tview.Flex // 房间信息那格，标题上写着最后更新时间
 }
 
 // box 给控件套一个带边框的壳，颜色跟主题统一。
@@ -146,8 +147,9 @@ func draw(busChan chan getter.DanmuMsg, roomInfoChan chan getter.RoomInfo) *widg
 	})
 
 	// 左栏自己再竖着切一刀：上面房间信息（固定几行就够），下面全给观众列表。
+	w.infoBox = box("直播间信息", w.info)
 	leftColumn := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(box("直播间信息", w.info), 6, 0, false).
+		AddItem(w.infoBox, 6, 0, false).
 		AddItem(box("观众列表", w.viewers), 0, 1, false)
 
 	grid := tview.NewGrid().

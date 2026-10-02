@@ -41,6 +41,8 @@ type RoomInfo struct {
 	Attention       int64
 	LiveStatus      int // 0 未开播 1 直播中 2 轮播
 	Time            string
+	UpdatedAt       time.Time // 最后一次成功拉到的时间
+	Failed          bool      // 这一轮没拉到，界面上摆的是旧数据
 	OnlineRankUsers []OnlineRankUser
 }
 
@@ -262,47 +264,57 @@ func (d *DanmuClient) receiveRawMsg(busChan chan DanmuMsg) {
 }
 
 func (d *DanmuClient) syncRoomInfo(roomInfoChan chan RoomInfo) {
+	// last 一直是「目前为止最完整的那一版」，推出去的就是它：
+	// 某一轮网络抖一下不该把界面刷白 —— 标个 Failed，让界面自己决定怎么提示。
+	var last RoomInfo
 	for {
 		if d.isClosed {
 			return
 		}
 
 		roomInfoApi := fmt.Sprintf("https://api.live.bilibili.com/room/v1/room/get_info?room_id=%d", d.roomID)
-		roomInfo := new(RoomInfo)
-		roomInfo.OnlineRankUsers = make([]OnlineRankUser, 0)
 		r1, err1 := requests.Get(roomInfoApi)
 		if err1 == nil {
-			roomInfo.RoomId = int(d.roomID)
-			roomInfo.Uid = int(gjson.Get(r1.Text(), "data.uid").Int())
-			roomInfo.Title = gjson.Get(r1.Text(), "data.title").String()
-			roomInfo.AreaName = gjson.Get(r1.Text(), "data.area_name").String()
-			roomInfo.ParentAreaName = gjson.Get(r1.Text(), "data.parent_area_name").String()
-			roomInfo.Online = gjson.Get(r1.Text(), "data.online").Int()
-			roomInfo.Attention = gjson.Get(r1.Text(), "data.attention").Int()
-			roomInfo.LiveStatus = int(gjson.Get(r1.Text(), "data.live_status").Int())
+			last.RoomId = int(d.roomID)
+			last.Uid = int(gjson.Get(r1.Text(), "data.uid").Int())
+			last.Title = gjson.Get(r1.Text(), "data.title").String()
+			last.AreaName = gjson.Get(r1.Text(), "data.area_name").String()
+			last.ParentAreaName = gjson.Get(r1.Text(), "data.parent_area_name").String()
+			last.Online = gjson.Get(r1.Text(), "data.online").Int()
+			last.Attention = gjson.Get(r1.Text(), "data.attention").Int()
+			last.LiveStatus = int(gjson.Get(r1.Text(), "data.live_status").Int())
 			// live_time 没开播时是 "0000-00-00 00:00:00"，解析出来是零值，
 			// 一减就是十几万天（界面上曾经真的显示过 739891天）。只在真在播时算。
-			if roomInfo.LiveStatus == 1 {
-				roomInfo.Time = liveDuration(gjson.Get(r1.Text(), "data.live_time").String())
+			if last.LiveStatus == 1 {
+				last.Time = liveDuration(gjson.Get(r1.Text(), "data.live_time").String())
 			}
+			last.UpdatedAt = time.Now()
+			last.Failed = false
+		} else {
+			last.Failed = true
 		}
 
-		onlineRankApi := fmt.Sprintf("https://api.live.bilibili.com/xlive/general-interface/v1/rank/getOnlineGoldRank?ruid=%d&roomId=%d&page=1&pageSize=50", roomInfo.Uid, d.roomID)
+		onlineRankApi := fmt.Sprintf("https://api.live.bilibili.com/xlive/general-interface/v1/rank/getOnlineGoldRank?ruid=%d&roomId=%d&page=1&pageSize=50", last.Uid, d.roomID)
 		r2, err2 := requests.Get(onlineRankApi)
 		if err2 == nil {
 			rawUsers := gjson.Get(r2.Text(), "data.OnlineRankItem").Array()
+			users := make([]OnlineRankUser, 0, len(rawUsers))
 			for _, rawUser := range rawUsers {
-				user := OnlineRankUser{
+				users = append(users, OnlineRankUser{
 					Name:  rawUser.Get("name").String(),
 					Score: rawUser.Get("score").Int(),
 					Rank:  rawUser.Get("userRank").Int(),
-				}
-				roomInfo.OnlineRankUsers = append(roomInfo.OnlineRankUsers, user)
+				})
 			}
+			last.OnlineRankUsers = users
 		}
 
-		roomInfoChan <- *roomInfo
-		time.Sleep(30 * time.Second)
+		roomInfoChan <- last
+
+		select {
+		case <-time.After(30 * time.Second):
+		case <-refreshChan: // 手动刷一下，不等这 30 秒
+		}
 	}
 }
 
@@ -357,6 +369,18 @@ func supervisor(busChan chan DanmuMsg, roomInfoChan chan RoomInfo) {
 		if dc.isClosed {
 			return
 		}
+	}
+}
+
+// refreshChan 是「手动刷一下」的入口。容量 1：连按几下也只会补一次，
+// 而且 Refresh 永远不阻塞 —— 它跑在界面的事件循环里，堵住就是把整个 TUI 冻住。
+var refreshChan = make(chan struct{}, 1)
+
+// Refresh 让房间信息立刻重拉一次。
+func Refresh() {
+	select {
+	case refreshChan <- struct{}{}:
+	default:
 	}
 }
 

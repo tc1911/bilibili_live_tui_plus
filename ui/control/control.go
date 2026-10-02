@@ -23,6 +23,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/tc1911/bilibili_live_tui_plus/config"
+	"github.com/tc1911/bilibili_live_tui_plus/getter"
 	"github.com/tc1911/bilibili_live_tui_plus/live"
 	"github.com/tc1911/bilibili_live_tui_plus/ui/cover"
 )
@@ -40,7 +41,7 @@ var tabNames = []string{"账号", "分区", "直播间信息", "推流码"}
 
 // tabHints 是每栏的按键提示，写在顶部那条里。
 var tabHints = []string{
-	"回车 重新扫码    Tab 换功能    Shift+Tab 回弹幕页    Esc 返回    Ctrl+C 退出",
+	"回车 重新扫码    Ctrl+R 刷新房间信息    Tab 换功能    Shift+Tab 回弹幕页    Esc 返回",
 	"↑↓ 选分区    ←→ 展开/收起    回车 确认该分区    Tab 换功能    Shift+Tab 回弹幕页",
 	"↑↓ 选一项    回车 编辑    再回车 提交    Esc 取消    Tab 换功能    Shift+Tab 回弹幕页",
 	"F4 开播    F5 下播    Tab 换功能    Shift+Tab 回弹幕页    Esc 返回",
@@ -306,6 +307,12 @@ func (p *panel) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	case tcell.KeyF5:
 		p.openPanel()
 		go p.stopLive()
+		return nil
+	case tcell.KeyCtrlR:
+		// 房间信息本来每 30 秒自己拉一次，想立刻看新的就按这个。
+		// 它不阻塞 —— Refresh 里是「塞得进就塞，塞不进算了」。
+		getter.Refresh()
+		p.setHint("已请求刷新房间信息")
 		return nil
 	case tcell.KeyF2:
 		p.openTab(tabAccount)

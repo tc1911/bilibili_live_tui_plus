@@ -355,3 +355,17 @@ func TestPanelLayout(t *testing.T) {
 		}
 	}
 }
+
+// Ctrl+R 在弹幕页上也能按（不用先翻开配置页），而且不该顺手把配置页翻开。
+func TestCtrlRRefreshesWithoutOpeningPanel(t *testing.T) {
+	p, _, main := newTestPanel(t)
+	p.panelOpen = false
+	p.app.SetFocus(main)
+
+	if got := p.onKey(key(tcell.KeyCtrlR)); got != nil {
+		t.Error("Ctrl+R 该被吃掉")
+	}
+	if p.panelOpen {
+		t.Error("Ctrl+R 不该翻开配置页")
+	}
+}
