@@ -1,5 +1,10 @@
 # bilibili 直播间 TUI
 
+> **已封存**：这个仓库不再维护，代码保持原样，只当参考实现留着。
+> 后续版本是用 Rust + ratatui 从零重写的 `bililive`（`~/项目/bililive`），
+> 接口行为（WBI 签名、弹幕协议、开播流程）都以本仓库的实测结论为准。
+> 下面的安装、使用、来源说明一律保留原样，不再更新。
+
 [关联的bilibili介绍视频](https://www.bilibili.com/video/bv1gG411G7XG)
 
 > 本文库是 [yaocccc/bilibili_live_tui](https://github.com/yaocccc/bilibili_live_tui) 的增强分支：
