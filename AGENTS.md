@@ -37,6 +37,7 @@ sender/          发弹幕（走 biligo）
 ui/ui.go         Run 入口：建 Application、起 handler、套上配置页
 ui/              主界面：screen.go（画）+ handler.go（收 channel）+ ui.go（Run 入口）
 ui/cover/        把封面图画进终端：抓图 -> 区域平均缩图 -> 半格字符上色（跟二维码一个套路）
+obs/             obs-websocket 5.x 客户端：开播后把服务器 + 密钥填进 OBS 的推流设置
                  左边一栏是直播间信息（固定 6 行）+ 观众列表（吃掉剩下的高度）
                  2026-10-03 拆掉了 1~5 号主题，只剩重做的这一套
 version/         版本号，打包时用 -ldflags -X 注入，本地 go build 是 dev
@@ -124,14 +125,25 @@ tview 的上下键只停在可选节点，父分区不可选就会被整段跳�
 - `bucket` 取 `openplatform`；换别的桶可能被拒
 - `UpdatePreLiveInfo` 虽然挂在 `app-blink` 下，网页端只带 csrf 就能过，**不要**给它加 app 签名
 
-### 10. 配置写入
+### 10. OBS 联动只管填，不管推
+
+`obs/` 走 obs-websocket 5.x 的 JSON 协议：`Hello` → `Identify`（要鉴权就带 challenge 应答）→
+`Identified` → `Request(SetStreamServiceSettings)`。几条规矩：
+
+- 服务类型用 `rtmp_custom`：B 站给的密钥自带 `?streamname=…`，原样塞进「串流密钥」框即可
+- 端口和密码在配置里留空就去读 OBS 自己的 `config.json`，省得让用户手抄密码；
+  `server_enabled` 是 false 时要直接说去 OBS 哪儿开，别只报「连不上」
+- **不要**顺手帮用户按「开始推流」：填配置是准备动作，开播那下得他自己按
+- 填失败一律只多一行字，绝不能让开播本身失败
+
+### 11. 配置写入
 
 - 路径固定在 `~/.config/bili/config.toml`（用 `os/user` 取 home，不是 `$HOME`）
 - `config.Save()` 写回 `config.ConfigFile`，登录 / 选分区后调用
 - `config.toml` 在 `.gitignore` 里，**永远不要**把它或里面的 Cookie 提交上去
 - Cookie 只在本地文件里流转，不要打印到日志
 
-### 11. locale 会重执行一次
+### 12. locale 会重执行一次
 
 `main.go` 的 `fixCharset`：`LANG` 是中日韩泰印地语系时把自己 `LANG=C.UTF-8` 重新 exec 一遍，
 好让 tview 正确算宽字符宽度。改启动流程时别把这个丢了，也别在里面加副作用。
