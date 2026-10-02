@@ -39,6 +39,8 @@ type RoomInfo struct {
 	AreaName        string
 	Online          int64
 	Attention       int64
+	LiveStatus      int    // 0 未开播 1 直播中 2 轮播
+	Cover           string // 封面图地址，没开播也有
 	Time            string
 	OnlineRankUsers []OnlineRankUser
 }
@@ -278,17 +280,16 @@ func (d *DanmuClient) syncRoomInfo(roomInfoChan chan RoomInfo) {
 			roomInfo.ParentAreaName = gjson.Get(r1.Text(), "data.parent_area_name").String()
 			roomInfo.Online = gjson.Get(r1.Text(), "data.online").Int()
 			roomInfo.Attention = gjson.Get(r1.Text(), "data.attention").Int()
-			_time, _ := time.Parse("2006-01-02 15:04:05", gjson.Get(r1.Text(), "data.live_time").String())
-			seconds := time.Now().Unix() - _time.Unix() + 8*60*60
-			days := seconds / 86400
-			hours := (seconds % 86400) / 3600
-			minutes := (seconds % 3600) / 60
-			if days > 0 {
-				roomInfo.Time = fmt.Sprintf("%d天%d时%d分", days, hours, minutes)
-			} else if hours > 0 {
-				roomInfo.Time = fmt.Sprintf("%d时%d分", hours, minutes)
-			} else {
-				roomInfo.Time = fmt.Sprintf("%d分", minutes)
+			roomInfo.LiveStatus = int(gjson.Get(r1.Text(), "data.live_status").Int())
+			// 封面接口给的是 user_cover（主播设的那张）；老文档里的 data.cover 现在不返了。
+			roomInfo.Cover = gjson.Get(r1.Text(), "data.user_cover").String()
+			if roomInfo.Cover == "" {
+				roomInfo.Cover = gjson.Get(r1.Text(), "data.cover").String()
+			}
+			// live_time 没开播时是 "0000-00-00 00:00:00"，解析出来是零值，
+			// 一减就是十几万天（界面上曾经真的显示过 739891天）。只在真在播时算。
+			if roomInfo.LiveStatus == 1 {
+				roomInfo.Time = liveDuration(gjson.Get(r1.Text(), "data.live_time").String())
 			}
 		}
 
@@ -367,4 +368,29 @@ func supervisor(busChan chan DanmuMsg, roomInfoChan chan RoomInfo) {
 
 func Run(busChan chan DanmuMsg, roomInfoChan chan RoomInfo) {
 	go supervisor(busChan, roomInfoChan)
+}
+
+// liveDuration 把开播时间算成「x天x时x分」。
+// live_time 是北京时间但不带时区，Parse 成 UTC 之后得补 8 小时。
+func liveDuration(liveTime string) string {
+	t, err := time.Parse("2006-01-02 15:04:05", liveTime)
+	if err != nil || t.IsZero() {
+		return ""
+	}
+	seconds := time.Now().Unix() - t.Unix() + 8*60*60
+	if seconds < 0 {
+		seconds = 0
+	}
+
+	days := seconds / 86400
+	hours := (seconds % 86400) / 3600
+	minutes := (seconds % 3600) / 60
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%d天%d时%d分", days, hours, minutes)
+	case hours > 0:
+		return fmt.Sprintf("%d时%d分", hours, minutes)
+	default:
+		return fmt.Sprintf("%d分", minutes)
+	}
 }
