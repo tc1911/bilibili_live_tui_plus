@@ -151,3 +151,37 @@ func TestConfirmModalEsc(t *testing.T) {
 		t.Errorf("再按 Esc 该关掉面板，焦点 = %T", app.GetFocus())
 	}
 }
+
+// 标题页是独立的一页，Esc 必须只关它、把焦点还给分区树。
+// 判断顺序写错就会先关掉整个面板，输入框跟着人一起消失。
+func TestTitlePageEsc(t *testing.T) {
+	config.Config.Background = "NONE"
+	app := tview.NewApplication()
+	main := tview.NewBox()
+	p := &panel{app: app, main: main, client: live.NewClient(""), onLogin: func() {}}
+	p.pages = tview.NewPages().
+		AddPage("main", main, true, true).
+		AddPage("control", p.build(), true, true).
+		AddPage("title", p.buildTitle(), true, false)
+	app.SetInputCapture(p.onKey)
+	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
+
+	p.onKey(tcell.NewEventKey(tcell.KeyF6, 0, tcell.ModNone))
+	if app.GetFocus() != p.titleInput {
+		t.Fatalf("F6 后焦点 = %T，want 标题输入框", app.GetFocus())
+	}
+
+	// 第一下 Esc：关标题页，控制面板还在。
+	if got := p.onKey(esc); got != nil {
+		t.Error("标题页开着时 Esc 该被吞掉（关它）")
+	}
+	if app.GetFocus() != p.tree {
+		t.Errorf("关掉标题页后焦点 = %T，want 分区树（否则整个面板被一起关了）", app.GetFocus())
+	}
+
+	// 第二下 Esc：面板还在，关掉它。
+	p.onKey(esc)
+	if app.GetFocus() != p.main {
+		t.Errorf("再按 Esc 该关掉面板，焦点 = %T", app.GetFocus())
+	}
+}

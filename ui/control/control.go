@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -25,6 +26,9 @@ type areaRef struct {
 // 它就是「用户还没设过自己的房间号」这个状态。
 const defaultRoomID int64 = 23333333
 
+// maxTitleRunes 是服务端给的标题上限（bilibili-API-collect 的 live/manage.md）。
+const maxTitleRunes = 40
+
 type panel struct {
 	app     *tview.Application
 	pages   *tview.Pages
@@ -38,6 +42,8 @@ type panel struct {
 	body    *tview.Flex
 	hint    *tview.TextView
 	tree    *tview.TreeView
+
+	titleInput *tview.InputField // 改标题那一页的输入框
 
 	mu      sync.Mutex // 串行化接口调用
 	qrGen   int        // 递增即作废旧的扫码轮询
@@ -58,7 +64,8 @@ func Wrap(app *tview.Application, root tview.Primitive, onLogin func()) *tview.P
 	p.pages = tview.NewPages().
 		AddPage("main", root, true, true).
 		AddPage("control", p.build(), true, false).
-		AddPage("streams", p.streams, true, false)
+		AddPage("streams", p.streams, true, false).
+		AddPage("title", p.buildTitle(), true, false)
 	p.pages.SetBackgroundColor(bgColor())
 	app.SetInputCapture(p.onKey)
 
@@ -137,11 +144,17 @@ func (p *panel) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	case tcell.KeyF5:
 		p.show()
 		go p.stopLive()
+	case tcell.KeyF6:
+		p.openTitle()
 	case tcell.KeyEscape:
 		// 确认弹窗开着时 Esc 归它。必须先判：全局 capture 跑在焦点分发之前，
 		// 底下那两个分支会把 Esc 当成「关面板」，弹窗就被连人带焦点丢在屏上。
 		if p.pages.HasPage("confirm") {
 			p.closeConfirm()
+			return nil
+		}
+		if p.pages.HasPage("title") && p.app.GetFocus() == p.titleInput {
+			p.closeTitle()
 			return nil
 		}
 		if p.pages.HasPage("streams") && p.app.GetFocus() == p.streams {
@@ -186,7 +199,7 @@ func (p *panel) setInfo() {
 		area = "未选择（F3）"
 	}
 	p.info.SetText(fmt.Sprintf(
-		"[white]账号:[-] %s\n[white]直播间:[-] %d\n[white]分区:[-] %s\n[white]按键:[-] F2 登录  F3 分区  F4 开播  F5 下播  Esc 关闭",
+		"[white]账号:[-] %s\n[white]直播间:[-] %d\n[white]分区:[-] %s\n[white]按键:[-] F2 登录  F3 分区  F4 开播  F5 下播  F6 改标题  Esc 关闭",
 		p.account, config.Config.RoomId, area))
 }
 
@@ -409,6 +422,108 @@ func (p *panel) pickArea(node *tview.TreeNode) {
 		return
 	}
 	p.setHint("开播分区已设为 " + ref.Name)
+}
+
+// ---------------------------------------------------------------- 改标题
+
+// buildTitle 是「改标题」那一页：输入框居中，下面一行提示。
+// 单独占一页而不是塞进信息栏：标题能有 40 个字，挤在四行的框里看不全也改不了。
+func (p *panel) buildTitle() *tview.Flex {
+	bg := bgColor()
+
+	p.titleInput = tview.NewInputField()
+	p.titleInput.SetLabel(" 标题: ")
+	p.titleInput.SetBackgroundColor(bg)
+	p.titleInput.SetFieldBackgroundColor(bg)
+	// 超长在这里就拦下，省得回车后只能收到服务端一句看不懂的报错。
+	p.titleInput.SetAcceptanceFunc(func(text string, _ rune) bool {
+		return utf8.RuneCountInString(text) < maxTitleRunes
+	})
+	// 取值留在事件循环里做，再交给 goroutine：输入框只由事件循环改，跨 goroutine 读是脏的。
+	p.titleInput.SetDoneFunc(func(key tcell.Key) {
+		if key == tcell.KeyEnter {
+			go p.applyTitle(strings.TrimSpace(p.titleInput.GetText()))
+		}
+	})
+
+	box := tview.NewFlex().AddItem(p.titleInput, 0, 1, true)
+	box.SetBorder(true).SetTitle(" 改直播间标题 ")
+	box.SetBackgroundColor(bg)
+
+	tip := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
+	tip.SetText(fmt.Sprintf("[yellow]回车提交，Esc 取消；上限 %d 字[-]", maxTitleRunes))
+	tip.SetBackgroundColor(bg)
+
+	col := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(nil, 0, 1, false).
+		AddItem(box, 3, 0, true).
+		AddItem(tip, 1, 0, false).
+		AddItem(nil, 0, 1, false)
+
+	page := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(col, 60, 0, true).
+		AddItem(nil, 0, 1, false)
+	page.SetBackgroundColor(bg)
+	return page
+}
+
+// openTitle 由事件循环调用：先把页面亮出来，再让后台去取当前标题。
+// 取标题要走网络，放事件循环里会把整个 TUI 冻住。
+func (p *panel) openTitle() {
+	p.show()
+	p.pages.ShowPage("title")
+	p.app.SetFocus(p.titleInput)
+	p.setHint("正在读取当前标题…")
+	go p.loadTitle()
+}
+
+func (p *panel) loadTitle() {
+	roomID := config.Config.RoomId
+	p.mu.Lock()
+	room, err := p.client.Room(roomID)
+	p.mu.Unlock()
+
+	p.update(func() {
+		if err != nil {
+			// 读不到不等于改不了，输入框照用。
+			p.setHint("读取当前标题失败，可以直接输入新标题: " + err.Error())
+			return
+		}
+		// 慢网下用户可能已经敲上了，别把人家打的字冲掉。
+		if p.titleInput.GetText() == "" {
+			p.titleInput.SetText(room.Title)
+		}
+		p.setHint(fmt.Sprintf("回车提交，Esc 取消；上限 %d 字", maxTitleRunes))
+	})
+}
+
+func (p *panel) applyTitle(title string) {
+	if title == "" {
+		p.update(func() { p.setHint("标题不能为空") })
+		return
+	}
+
+	p.mu.Lock()
+	err := p.client.UpdateTitle(config.Config.RoomId, title)
+	p.mu.Unlock()
+
+	p.update(func() {
+		if err != nil {
+			p.setHint("改标题失败: " + err.Error())
+			return
+		}
+		p.closeTitle()
+		p.setHint("标题已改为「" + title + "」")
+	})
+}
+
+// closeTitle 收起标题页并把焦点还给分区树，跟关确认弹窗一个道理：
+// 焦点留在输入框上，面板看着还在、实际按什么都没反应。
+func (p *panel) closeTitle() {
+	p.pages.HidePage("title")
+	p.pages.ShowPage("control")
+	p.app.SetFocus(p.tree)
 }
 
 // ---------------------------------------------------------------- 开播 / 下播

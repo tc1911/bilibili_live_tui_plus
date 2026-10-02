@@ -324,3 +324,17 @@ func (c *Client) StopLive(roomID int64) error {
 	}, false)
 	return err
 }
+
+// UpdateTitle 改直播间标题。同一个接口（room_id + area_id + add_tag/del_tag）
+// 理论上也能改分区和标签，这里只用到标题。
+// 标题上限 40 字符，超了服务端只会回一句语焉不详的错误，所以在 UI 那层就拦住。
+func (c *Client) UpdateTitle(roomID int64, title string) error {
+	_, err := c.post(liveBase, "/room/v1/Room/update", map[string]string{
+		"room_id":    strconv.FormatInt(roomID, 10),
+		"title":      title,
+		"platform":   "pc_link",
+		"csrf":       c.csrf(),
+		"csrf_token": c.csrf(),
+	}, false)
+	return err
+}
