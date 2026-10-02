@@ -36,6 +36,7 @@ live/            B 站 API 客户端：扫码登录、分区表、开播取推�
 sender/          发弹幕（走 biligo）
 ui/ui.go         Run 入口：建 Application、起 handler、套上配置页
 ui/              主界面：screen.go（画）+ handler.go（收 channel）+ ui.go（Run 入口）
+ui/cover/        把封面图画进终端：抓图 -> 区域平均缩图 -> 半格字符上色（跟二维码一个套路）
                  左边一栏是直播间信息（固定 6 行）+ 观众列表（吃掉剩下的高度）
                  2026-10-03 拆掉了 1~5 号主题，只剩重做的这一套
 version/         版本号，打包时用 -ldflags -X 注入，本地 go build 是 dev
@@ -94,23 +95,26 @@ B 站 2025-05-26 起对 `getDanmuInfo` 强制 WBI 签名，缺签名一律返 `-
 
 ### 6. Esc 只负责「返回」，退出是 Ctrl+C
 
-Esc 在弹窗 → 信息页 / 推流码页 → 面板之间逐层收，**退到底也只浮一句提示（再按一下收掉它），不退出**。
-别顺手把退到底的 Esc 接成 `app.Stop()`：那会变成「一路按 Esc 就直接关掉程序」。
-唯一退出键是 `Ctrl+C`（tview 自己处理的），README 里那句「`<esc>` 退出」是上游留下来的假话。
+层级固定是：**确认弹窗 > 临时提示 > 取消编辑 > 收起配置页**；退到弹幕页就停住，不退出。
+别顺手把退到底的 Esc 接成 `app.Stop()` —— 那会变成「一路按 Esc 就把程序按没了」。
+唯一退出键是 `Ctrl+C`（tview 自己处理的）。
 
-### 6. Esc 是全局 InputCapture，抢在焦点分发之前
+`onKey` 是全局 InputCapture，跑在焦点分发之前，所以判断顺序不能乱：弹窗、提示都挂在 `Pages`
+的最上层，谁在上面谁先吃 Esc；顺序错了就会出现「面板关了、弹窗还留在屏上动不了」。
 
-`ui/control/control.go` 的 `onKey` 跑得比 tview 的按键分发早，所以判断顺序很讲究：
-确认弹窗 > 推流码页 > 面板。`focused()` **不能**写成「焦点不在 main 就算面板」——
-弹窗的按钮恰好也不在 main，那样 Esc 会关掉面板、把弹窗连焦点留在屏上变成死界面。
-
-### 7. 分区树：父节点不可选，左右键要自己处理
+### 7. 分区树
 
 tview 的上下键只停在可选节点，父分区不可选就会被整段跳过（用户卡过的坑）；
 左右键在 tview 里只移动选中项，展开 / 收起得靠 `treeKeyCapture` 自己拦，
 并且**在已经展开 / 收起之后要把事件交回去**，否则人回不到父分区。
 
-### 8. 封面必须先落到 B 站图床
+### 8. 封面有两件事，别混
+
+- **看**：配置页「直播间信息」栏下半格那个封面预览，走 `ui/cover` 包（按控件实际大小现采样，
+  终端一拉伸画面自己就跟着变，不用重新抓图）
+- **改**：同一个栏里的「封面」输入框，见下一条
+
+### 9. 改封面必须先落到 B 站图床
 
 `UpdatePreLiveInfo` 的 `cover` 只认 `.hdslb.com` 下的图片地址，别处来的链接一律回 `100402`，
 所以「改封面」是两步：`UploadImage` 传图床拿地址 → `UpdateCover` 更新。
@@ -120,14 +124,14 @@ tview 的上下键只停在可选节点，父分区不可选就会被整段跳�
 - `bucket` 取 `openplatform`；换别的桶可能被拒
 - `UpdatePreLiveInfo` 虽然挂在 `app-blink` 下，网页端只带 csrf 就能过，**不要**给它加 app 签名
 
-### 9. 配置写入
+### 10. 配置写入
 
 - 路径固定在 `~/.config/bili/config.toml`（用 `os/user` 取 home，不是 `$HOME`）
 - `config.Save()` 写回 `config.ConfigFile`，登录 / 选分区后调用
 - `config.toml` 在 `.gitignore` 里，**永远不要**把它或里面的 Cookie 提交上去
 - Cookie 只在本地文件里流转，不要打印到日志
 
-### 10. locale 会重执行一次
+### 11. locale 会重执行一次
 
 `main.go` 的 `fixCharset`：`LANG` 是中日韩泰印地语系时把自己 `LANG=C.UTF-8` 重新 exec 一遍，
 好让 tview 正确算宽字符宽度。改启动流程时别把这个丢了，也别在里面加副作用。
