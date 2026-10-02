@@ -56,9 +56,6 @@ func roomInfoHandler(app *tview.Application, w *widgets, roomInfoChan chan gette
 
 		w.stream.SetText(streamStatus(ri))
 
-		// 封面只在地址变了的时候真去抓，Load 自己记得上一张是什么。
-		w.cover.Load(ri.Cover, func() { app.Draw() })
-
 		app.Draw()
 	}
 }

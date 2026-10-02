@@ -24,7 +24,6 @@ import (
 	"github.com/tc1911/bilibili_live_tui_plus/config"
 	"github.com/tc1911/bilibili_live_tui_plus/getter"
 	"github.com/tc1911/bilibili_live_tui_plus/sender"
-	"github.com/tc1911/bilibili_live_tui_plus/ui/cover"
 	"github.com/tc1911/bilibili_live_tui_plus/version"
 )
 
@@ -51,7 +50,6 @@ type widgets struct {
 	viewers  *tview.TextView
 	info     *tview.TextView
 	stream   *tview.TextView
-	cover    *cover.View
 }
 
 // box 给控件套一个带边框的壳，颜色跟主题统一。
@@ -88,14 +86,6 @@ func draw(busChan chan getter.DanmuMsg, roomInfoChan chan getter.RoomInfo) *widg
 	// 左上：直播间信息 + 封面预览
 	w.info = tview.NewTextView().SetDynamicColors(true).SetWrap(false)
 	w.info.SetBackgroundColor(bg)
-
-	w.cover = cover.New()
-	w.cover.SetHint("封面加载中…")
-	w.cover.SetBackgroundColor(bg)
-
-	infoPane := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(w.info, 5, 0, false).
-		AddItem(w.cover, 0, 1, false)
 
 	// 左下：观众列表
 	w.viewers = tview.NewTextView().SetDynamicColors(true)
@@ -155,9 +145,9 @@ func draw(busChan chan getter.DanmuMsg, roomInfoChan chan getter.RoomInfo) *widg
 		return ev
 	})
 
-	// 左栏自己再竖着切一刀：上面房间信息（带封面），下面观众列表。
+	// 左栏自己再竖着切一刀：上面房间信息（固定几行就够），下面全给观众列表。
 	leftColumn := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(box("直播间信息", infoPane), 0, 2, false).
+		AddItem(box("直播间信息", w.info), 6, 0, false).
 		AddItem(box("观众列表", w.viewers), 0, 1, false)
 
 	grid := tview.NewGrid().

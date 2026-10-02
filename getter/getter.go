@@ -39,8 +39,7 @@ type RoomInfo struct {
 	AreaName        string
 	Online          int64
 	Attention       int64
-	LiveStatus      int    // 0 未开播 1 直播中 2 轮播
-	Cover           string // 封面图地址，没开播也有
+	LiveStatus      int // 0 未开播 1 直播中 2 轮播
 	Time            string
 	OnlineRankUsers []OnlineRankUser
 }
@@ -281,11 +280,6 @@ func (d *DanmuClient) syncRoomInfo(roomInfoChan chan RoomInfo) {
 			roomInfo.Online = gjson.Get(r1.Text(), "data.online").Int()
 			roomInfo.Attention = gjson.Get(r1.Text(), "data.attention").Int()
 			roomInfo.LiveStatus = int(gjson.Get(r1.Text(), "data.live_status").Int())
-			// 封面接口给的是 user_cover（主播设的那张）；老文档里的 data.cover 现在不返了。
-			roomInfo.Cover = gjson.Get(r1.Text(), "data.user_cover").String()
-			if roomInfo.Cover == "" {
-				roomInfo.Cover = gjson.Get(r1.Text(), "data.cover").String()
-			}
 			// live_time 没开播时是 "0000-00-00 00:00:00"，解析出来是零值，
 			// 一减就是十几万天（界面上曾经真的显示过 739891天）。只在真在播时算。
 			if roomInfo.LiveStatus == 1 {

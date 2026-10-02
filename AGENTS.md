@@ -36,8 +36,8 @@ live/            B 站 API 客户端：扫码登录、分区表、开播取推�
 sender/          发弹幕（走 biligo）
 ui/ui.go         Run 入口：建 Application、起 handler、套上配置页
 ui/              主界面：screen.go（画）+ handler.go（收 channel）+ ui.go（Run 入口）
+                 左边一栏是直播间信息（固定 6 行）+ 观众列表（吃掉剩下的高度）
                  2026-10-03 拆掉了 1~5 号主题，只剩重做的这一套
-ui/cover/        把封面画进终端：抓图 -> 区域平均缩图 -> 半格字符上色（跟二维码一个套路）
 version/         版本号，打包时用 -ldflags -X 注入，本地 go build 是 dev
 ui/control/      配置页（Shift+Tab 在两页间切）：顶部提示条 / 左栏功能 / 右栏内容，
                  功能是账号 / 分区 / 直播间信息 / 推流码，Tab 换栏，↑↓ 选，回车编辑，Esc 取消
